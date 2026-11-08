@@ -554,6 +554,9 @@ class ScreenshotParser {
     'rent': 'Rent',
     'emi': 'EMI & Loans',
     'investments': 'Investments',
+    'sip': 'SIP & Mutual Funds',
+    'mutual funds': 'SIP & Mutual Funds',
+    'mutual fund': 'SIP & Mutual Funds',
     'personal care': 'Personal Care',
   };
 

@@ -883,11 +883,38 @@ class AppStore extends ChangeNotifier {
   Iterable<Txn> txnsInMonth(DateTime month) =>
       txns.where((t) => _inMonth(t.date, month));
 
-  /// Money spent in [month]. Credit-card bill payments are left out: the
-  /// purchases they pay for were already counted on the card.
-  double spentIn(DateTime month) => txnsInMonth(month)
-      .where((t) => t.type == TxnType.debit && t.category != cardBillCategory)
+  /// Whether a debit counts as spending. Card-bill payments don't (the
+  /// purchases were counted on the card) and neither do SIPs/investments
+  /// (that money is saved; see [investedIn]).
+  static bool isSpending(Txn t) =>
+      t.type == TxnType.debit &&
+      t.category != cardBillCategory &&
+      !investmentCategories.contains(t.category);
+
+  /// Money spent in [month].
+  double spentIn(DateTime month) =>
+      txnsInMonth(month).where(isSpending).fold(0.0, (s, t) => s + t.amount);
+
+  /// Money put into SIPs and other investments in [month].
+  double investedIn(DateTime month) => txnsInMonth(month)
+      .where(
+        (t) =>
+            t.type == TxnType.debit &&
+            investmentCategories.contains(t.category),
+      )
       .fold(0.0, (s, t) => s + t.amount);
+
+  /// SIP payments in [year], newest first.
+  List<Txn> sipsInYear(int year) =>
+      txns
+          .where(
+            (t) =>
+                t.type == TxnType.debit &&
+                t.category == sipCategory &&
+                t.date.year == year,
+          )
+          .toList()
+        ..sort((a, b) => b.date.compareTo(a.date));
 
   double receivedIn(DateTime month) =>
       txnsInMonth(month)
@@ -897,7 +924,8 @@ class AppStore extends ChangeNotifier {
   List<CategoryTotal> categoryTotals(DateTime month, TxnType type) {
     final map = <String, double>{};
     for (final t in txnsInMonth(month).where((t) => t.type == type)) {
-      if (t.category == cardBillCategory) continue; // not spending
+      // Card bills and investments aren't spending.
+      if (type == TxnType.debit && !isSpending(t)) continue;
       map[t.category] = (map[t.category] ?? 0) + t.amount;
     }
     final list = map.entries.map((e) => CategoryTotal(e.key, e.value)).toList();
@@ -907,8 +935,63 @@ class AppStore extends ChangeNotifier {
 
   double accountSpentIn(Account a, DateTime month) =>
       txnsInMonth(month)
-          .where((t) => t.accountId == a.id && t.type == TxnType.debit)
+          .where((t) => t.accountId == a.id && isSpending(t))
           .fold(0.0, (s, t) => s + t.amount);
+
+  static const _fundNames = {
+    'parag parikh': 'Parag Parikh MF',
+    'ppfas': 'Parag Parikh MF',
+    'zerodha coin': 'Zerodha Coin',
+    'coin by zerodha': 'Zerodha Coin',
+    'iccl': 'Zerodha Coin',
+    'bse star': 'BSE StAR MF',
+    'bsestarmf': 'BSE StAR MF',
+    'bse limited': 'BSE StAR MF',
+    'bse ltd': 'BSE StAR MF',
+    'groww': 'Groww',
+    'kuvera': 'Kuvera',
+    'paytm money': 'Paytm Money',
+    'et money': 'ET Money',
+    'etmoney': 'ET Money',
+    'scripbox': 'Scripbox',
+    'sbi mf': 'SBI MF',
+    'sbi mutual': 'SBI MF',
+    'hdfc mf': 'HDFC MF',
+    'hdfc mutual': 'HDFC MF',
+    'icici pru': 'ICICI Prudential MF',
+    'axis mf': 'Axis MF',
+    'axis mutual': 'Axis MF',
+    'nippon': 'Nippon India MF',
+    'mirae': 'Mirae Asset MF',
+    'kotak mf': 'Kotak MF',
+    'kotak mutual': 'Kotak MF',
+    'uti mf': 'UTI MF',
+    'uti mutual': 'UTI MF',
+    'quant mf': 'Quant MF',
+    'aditya birla sun life': 'Aditya Birla Sun Life MF',
+    'dsp mf': 'DSP MF',
+    'tata mf': 'Tata MF',
+    'franklin templeton': 'Franklin Templeton MF',
+    'motilal oswal': 'Motilal Oswal MF',
+    'edelweiss': 'Edelweiss MF',
+    'canara robeco': 'Canara Robeco MF',
+    'sundaram': 'Sundaram MF',
+    'invesco': 'Invesco MF',
+    'bandhan': 'Bandhan MF',
+    'cams': 'CAMS',
+    'kfin': 'KFintech',
+  };
+
+  /// A readable name for a SIP's fund or platform, for grouping.
+  String sipFundName(Txn t) {
+    final alias = merchantRule(t.counterparty)?.alias ?? '';
+    if (alias.isNotEmpty) return alias;
+    final text = '${t.counterparty} ${t.rawMessage} ${t.note}'.toLowerCase();
+    for (final e in _fundNames.entries) {
+      if (text.contains(e.key)) return e.value;
+    }
+    return t.counterparty.trim().isEmpty ? 'Other SIPs' : t.counterparty;
+  }
 
   /// Outstanding lend/borrow per person (case-insensitive names).
   List<PersonBalance> personBalances() {

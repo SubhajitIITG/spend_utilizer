@@ -20,7 +20,8 @@ const debitCategories = <Category>[
   Category('Education', '📚'),
   Category('Travel', '✈️'),
   Category('EMI & Loans', '🏦'),
-  Category('Investments', '📈'),
+  Category(sipCategory, '📈'),
+  Category('Investments', '💹'),
   Category('Insurance', '🛡️'),
   Category('Personal Care', '💇'),
   Category('Gifts & Donations', '🎁'),
@@ -47,6 +48,11 @@ const friendsCategory = 'Friends & Family';
 
 /// Money sent to people by bank transfer / UPI (not to shops).
 const payeesCategory = 'Payees';
+
+/// Monthly SIPs / mutual fund purchases. Saved, not spent: shown as
+/// "Invested" and left out of spending totals (with other investments).
+const sipCategory = 'SIP & Mutual Funds';
+const investmentCategories = {sipCategory, 'Investments'};
 
 /// Paying a credit-card bill. Not new spending (the purchases were already
 /// counted on the card), so it is left out of spending totals.
@@ -80,6 +86,56 @@ const _debitRules = <String, List<String>>{
     'ccbillpay',
     'cred club',
     'creditcard bill',
+  ],
+  // SIPs often arrive as auto-debits ("ACH D- BSE LIMITED", "NACH …
+  // ICCL"): match them before EMI's generic 'nach'.
+  sipCategory: [
+    'sip',
+    'mutual fund',
+    'mutualfund',
+    'mf sip',
+    'bse limited',
+    'bse ltd',
+    'bsestarmf',
+    'bse star',
+    'iccl',
+    'indian clearing',
+    'cams',
+    'kfintech',
+    'kfin',
+    'mf utilit',
+    'groww',
+    'kuvera',
+    'coin by zerodha',
+    'paytm money',
+    'et money',
+    'etmoney',
+    'scripbox',
+    'fundsindia',
+    'sbi mf',
+    'hdfc mf',
+    'icici pru',
+    'axis mf',
+    'nippon india mf',
+    'nippon',
+    'mirae',
+    'ppfas',
+    'parag parikh',
+    'kotak mf',
+    'uti mf',
+    'quant mf',
+    'aditya birla sun life',
+    'absl mf',
+    'dsp mf',
+    'tata mf',
+    'franklin templeton',
+    'motilal oswal mf',
+    'edelweiss mf',
+    'canara robeco',
+    'sundaram mf',
+    'invesco',
+    'hsbc mf',
+    'bandhan mf',
   ],
   'Groceries': [
     'bigbasket',
@@ -261,12 +317,7 @@ const _debitRules = <String, List<String>>{
   'EMI & Loans': ['emi', 'loan', 'bajaj finserv', 'nach', 'ecs'],
   'Investments': [
     'zerodha',
-    'groww',
     'upstox',
-    'mutual fund',
-    'sip',
-    'kuvera',
-    'coin by',
     'nps',
     'ppf',
     'smallcase',

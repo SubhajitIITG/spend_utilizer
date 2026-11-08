@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 
 import '../data/store.dart';
 import '../models/models.dart';
+import 'categories.dart';
 
 class ExportRange {
   final String label;
@@ -100,22 +101,32 @@ class ExcelExporter {
         ),
       ]);
     }
+    bool invested(Txn t) =>
+        t.type == TxnType.debit && investmentCategories.contains(t.category);
     final totalSpent = txns
-        .where((t) => t.type == TxnType.debit)
+        .where(AppStore.isSpending)
+        .fold(0.0, (s, t) => s + t.amount);
+    final totalInvested = txns
+        .where(invested)
         .fold(0.0, (s, t) => s + t.amount);
     final totalIn = txns
         .where((t) => t.type == TxnType.credit)
         .fold(0.0, (s, t) => s + t.amount);
     tx.appendRow([]);
     tx.appendRow([_t('Total spent'), _t(''), _n(totalSpent)]);
+    tx.appendRow([_t('Total invested (SIP etc.)'), _t(''), _n(totalInvested)]);
     tx.appendRow([_t('Total received'), _t(''), _n(totalIn)]);
-    tx.appendRow([_t('Net'), _t(''), _n(totalIn - totalSpent)]);
+    tx.appendRow([_t('Net'), _t(''), _n(totalIn - totalSpent - totalInvested)]);
+    tx.appendRow([
+      _t('Credit-card bill payments and investments are not counted as spent.'),
+    ]);
 
     // ---- Monthly summary
     final monthly = excel['Monthly Summary'];
     _header(monthly, [
       'Month',
       'Spent (₹)',
+      'Invested (₹)',
       'Received (₹)',
       'Net (₹)',
       'Transactions',
@@ -126,16 +137,18 @@ class ExcelExporter {
     }
     for (final e in months.entries) {
       final spent = e.value
-          .where((t) => t.type == TxnType.debit)
+          .where(AppStore.isSpending)
           .fold(0.0, (s, t) => s + t.amount);
+      final inv = e.value.where(invested).fold(0.0, (s, t) => s + t.amount);
       final recv = e.value
           .where((t) => t.type == TxnType.credit)
           .fold(0.0, (s, t) => s + t.amount);
       monthly.appendRow([
         _t(_m.format(e.key)),
         _n(spent),
+        _n(inv),
         _n(recv),
-        _n(recv - spent),
+        _n(recv - spent - inv),
         IntCellValue(e.value.length),
       ]);
     }
@@ -160,11 +173,27 @@ class ExcelExporter {
       for (final e in entries) {
         final s = _sum(e.value);
         cat.appendRow([
-          _t(type == TxnType.debit ? 'Spent' : 'Received'),
+          _t(
+            type == TxnType.credit
+                ? 'Received'
+                : investmentCategories.contains(e.key)
+                ? 'Invested'
+                : e.key == cardBillCategory
+                ? 'Card bill'
+                : 'Spent',
+          ),
           _t(e.key),
           _n(s),
           IntCellValue(e.value.length),
-          _t(total == 0 ? '' : '${(s / total * 100).toStringAsFixed(1)}%'),
+          // Share of spending only for spending categories.
+          _t(
+            total == 0 ||
+                    (type == TxnType.debit &&
+                        (investmentCategories.contains(e.key) ||
+                            e.key == cardBillCategory))
+                ? ''
+                : '${(s / total * 100).toStringAsFixed(1)}%',
+          ),
         ]);
       }
     }

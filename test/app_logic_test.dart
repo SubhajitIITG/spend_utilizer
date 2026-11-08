@@ -4,6 +4,7 @@ import 'package:spend_utilizer/data/store.dart';
 import 'package:spend_utilizer/models/models.dart';
 import 'package:spend_utilizer/services/chat_engine.dart';
 import 'package:spend_utilizer/services/excel_export.dart';
+import 'package:spend_utilizer/services/sms_parser.dart';
 import 'package:spend_utilizer/util/format.dart';
 
 const hdfcCard1 =
@@ -274,5 +275,69 @@ void main() {
     expect(s.txns.single.category, 'Payees');
     expect(s.accountById('c')!.isMine, isTrue);
     expect(s.accountById('h')!.ownership, Ownership.pending);
+  });
+
+  group('SIP & Mutual Funds', () {
+    const sips = [
+      'Rs.5,000.00 debited from A/c XX1234 on 05-11-26 ACH D- BSE LIMITED '
+          '-SBI',
+      'Your A/c XX1234 debited for INR 2,000 on 05-11-26 towards NACH Dr '
+          'ICCL ZERODHA COIN. -HDFC',
+      'Rs 1,500 debited from A/c XX1234 on 05-11-26 for SIP in Parag Parikh '
+          'Flexi Cap Fund. -Axis',
+      'INR 3,000 debited from A/c XX1234 on 05-11-26 to VPA groww.mf@yesbank '
+          '(UPI Ref No 612345600001) -ICICI',
+      'Rs.2,500 debited from a/c XX1234 on 05-11-26 HDFC Mutual Fund '
+          'auto debit -SBI',
+    ];
+
+    test('SIP debits are recognised', () {
+      for (final sms in sips) {
+        expect(
+          SmsParser.parse(sms)!.category,
+          'SIP & Mutual Funds',
+          reason: sms,
+        );
+      }
+      // An ordinary EMI auto-debit stays an EMI.
+      expect(
+        SmsParser.parse(
+          'Rs.8,000 debited from A/c XX1234 on 05-11-26 '
+          'NACH Dr BAJAJ FINSERV EMI -SBI',
+        )!.category,
+        'EMI & Loans',
+      );
+    });
+
+    test('SIPs count as Invested, not Spent', () async {
+      final s = await newStore();
+      for (final sms in sips) {
+        s.addFromSms(sms);
+      }
+      s.addFromSms(
+        'Rs.500 debited from A/c XX1234 on 05-11-26 to VPA '
+        'swiggy@axisbank (UPI Ref No 512345678999) -SBI',
+      );
+      s.addFromSms(
+        'Your A/c XX1234 is credited with Rs.50,000 on 01-11-26 '
+        'by NEFT-SAL ACME -SBI',
+      );
+      final nov = DateTime(2026, 11);
+      expect(s.spentIn(nov), 500);
+      expect(s.investedIn(nov), 14000);
+      expect(s.sipsInYear(2026).length, 5);
+      expect(s.sipsInYear(2026).map(s.sipFundName).toSet(), {
+        'BSE StAR MF',
+        'Zerodha Coin',
+        'Parag Parikh MF',
+        'Groww',
+        'HDFC MF',
+      });
+      // Per-account "spent" leaves SIPs out too.
+      expect(s.accountSpentIn(s.accounts.first, nov), 500);
+      expect(s.categoryTotals(nov, TxnType.debit).map((c) => c.category), [
+        'Food & Dining',
+      ]);
+    });
   });
 }

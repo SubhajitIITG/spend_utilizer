@@ -93,6 +93,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 child: _AccountsOverview(store: store, month: _month),
               ),
+              if (store.sipsInYear(_month.year).isNotEmpty)
+                _Section(
+                  title: 'SIP & Mutual Funds',
+                  child: _SipOverview(store: store, month: _month),
+                ),
               _Section(
                 title: 'Lend & borrow',
                 child: _DebtsOverview(store: store),
@@ -169,7 +174,9 @@ class _HeroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final spent = store.spentIn(month);
     final recv = store.receivedIn(month);
-    final net = recv - spent;
+    final invested = store.investedIn(month);
+    // What's left after spending and investing.
+    final net = recv - spent - invested;
     final count = store.txnsInMonth(month).length;
     const muted = TextStyle(color: Color(0xCCFFFFFF), fontSize: 12.5);
 
@@ -268,17 +275,13 @@ class _HeroCard extends StatelessWidget {
                 Row(
                   children: [
                     stat('Received', money(recv), const Color(0xFF8FE3B5)),
+                    stat('Invested', money(invested), Royal.goldLight),
                     stat(
                       'Net',
                       '${net < 0 ? '−' : ''}${money(net.abs())}',
                       net >= 0
                           ? const Color(0xFF8FE3B5)
                           : const Color(0xFFFFA19A),
-                    ),
-                    stat(
-                      'Others owe you',
-                      money(store.totalToReceive),
-                      Royal.goldLight,
                     ),
                   ],
                 ),
@@ -481,6 +484,82 @@ class _MerchantReview extends StatelessWidget {
               child: const Text('Tell me'),
             ),
           ),
+      ],
+    );
+  }
+}
+
+class _SipOverview extends StatelessWidget {
+  final AppStore store;
+  final DateTime month;
+  const _SipOverview({required this.store, required this.month});
+
+  @override
+  Widget build(BuildContext context) {
+    final year = store.sipsInYear(month.year);
+    final thisMonth = year.where((t) => t.date.month == month.month).toList();
+    // One row per fund (merchant), with this month's total.
+    final byFund = <String, (double, int)>{};
+    for (final t in thisMonth) {
+      final name = store.sipFundName(t);
+      final cur = byFund[name] ?? (0.0, 0);
+      byFund[name] = (cur.$1 + t.amount, cur.$2 + 1);
+    }
+    final yearTotal = year.fold(0.0, (s, t) => s + t.amount);
+    final monthTotal = thisMonth.fold(0.0, (s, t) => s + t.amount);
+    final t = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('This month', style: t.labelMedium),
+                  Text(
+                    money(monthTotal),
+                    style: t.titleLarge?.copyWith(color: Royal.income(context)),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('So far in ${month.year}', style: t.labelMedium),
+                  Text(money(yearTotal), style: t.titleLarge),
+                ],
+              ),
+            ),
+          ],
+        ),
+        if (byFund.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 10),
+            child: Text('No SIP payments this month yet.'),
+          )
+        else ...[
+          const SizedBox(height: 8),
+          for (final e in byFund.entries)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Text('📈', style: TextStyle(fontSize: 20)),
+              title: Text(e.key, overflow: TextOverflow.ellipsis),
+              subtitle: Text(
+                '${e.value.$2} payment${e.value.$2 == 1 ? '' : 's'}',
+              ),
+              trailing: Text(
+                money(e.value.$1),
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+        ],
+        const SizedBox(height: 4),
+        Text('SIPs are counted as Invested, not Spent.', style: t.bodySmall),
       ],
     );
   }
