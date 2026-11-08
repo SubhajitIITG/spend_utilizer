@@ -71,7 +71,7 @@ class AccountsScreen extends StatelessWidget {
                                 alignment: Alignment.center,
                                 decoration: const BoxDecoration(
                                   shape: BoxShape.circle,
-                                  gradient: Royal.gradient,
+                                  color: Royal.purple,
                                 ),
                                 child: Text(
                                   e.key.isEmpty ? '?' : e.key[0].toUpperCase(),

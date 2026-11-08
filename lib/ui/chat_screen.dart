@@ -51,9 +51,48 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  /// Asks before wiping the chat. Transactions, accounts and reminders are
+  /// not affected.
+  Future<void> _confirmClearChat() async {
+    final store = context.read<AppStore>();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear chat history?'),
+        content: const Text(
+          'This removes the messages on this screen only. Your transactions, '
+          'accounts, reminders and History stay safe.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clear chat'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    engine.cancel();
+    store.clearChat();
+    _controller.clear();
+    setState(() {});
+  }
+
   void _send(String text) {
     final t = text.trim();
     if (t.isEmpty) return;
+    // Typing "clear", "clear chat" or "/clear" also clears the chat.
+    if (RegExp(
+      r'^/?(clear|clear chat|clear history|clear chat history)$',
+      caseSensitive: false,
+    ).hasMatch(t)) {
+      _confirmClearChat();
+      return;
+    }
     final store = context.read<AppStore>();
     store.addChat(
       ChatMessage(
@@ -122,7 +161,7 @@ class _ChatScreenState extends State<ChatScreen> {
           const SyncStatusButton(),
           PopupMenuButton<String>(
             onSelected: (v) {
-              if (v == 'clear') store.clearChat();
+              if (v == 'clear') _confirmClearChat();
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'clear', child: Text('Clear chat history')),
@@ -149,6 +188,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onOption: _send,
             onPaste: _pasteFromClipboard,
             onPickDate: _pickDate,
+            onClearChat: store.chat.isEmpty ? null : _confirmClearChat,
           ),
           Container(
             decoration: BoxDecoration(
@@ -156,13 +196,6 @@ class _ChatScreenState extends State<ChatScreen> {
               border: Border(
                 top: BorderSide(color: Royal.gold.withValues(alpha: 0.5)),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Royal.deep.withValues(alpha: 0.08),
-                  blurRadius: 12,
-                  offset: const Offset(0, -4),
-                ),
-              ],
             ),
             child: SafeArea(
               top: false,
@@ -317,12 +350,16 @@ class _OptionsBar extends StatelessWidget {
   final VoidCallback onPaste;
   final VoidCallback onPickDate;
 
+  /// Null hides the "Clear chat" chip (nothing to clear).
+  final VoidCallback? onClearChat;
+
   const _OptionsBar({
     required this.engine,
     required this.onFlow,
     required this.onOption,
     required this.onPaste,
     required this.onPickDate,
+    required this.onClearChat,
   });
 
   @override
@@ -348,6 +385,15 @@ class _OptionsBar extends StatelessWidget {
             avatar: Text(f.emoji),
             label: Text(f.label),
             onPressed: () => onFlow(f),
+          ),
+        );
+      }
+      if (onClearChat != null) {
+        chips.add(
+          ActionChip(
+            avatar: const Text('🧹'),
+            label: const Text('Clear chat'),
+            onPressed: onClearChat,
           ),
         );
       }
@@ -424,24 +470,18 @@ class _Bubble extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 5),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       decoration: BoxDecoration(
-        gradient: mine ? Royal.gradient : null,
-        color: mine ? null : scheme.surfaceContainerLow,
+        // Solid wine for you, ivory card with a gold rule on the left
+        // for the bot. No shadows: flat, like printed paper.
+        color: mine ? Royal.purple : scheme.surfaceContainerLow,
         border: mine
             ? null
-            : Border.all(color: Royal.gold.withValues(alpha: 0.45), width: 0.8),
+            : const Border(left: BorderSide(color: Royal.gold, width: 3)),
         borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(20),
-          topRight: const Radius.circular(20),
-          bottomLeft: Radius.circular(mine ? 20 : 6),
-          bottomRight: Radius.circular(mine ? 6 : 20),
+          topLeft: Radius.circular(mine ? 14 : 2),
+          topRight: const Radius.circular(14),
+          bottomLeft: Radius.circular(mine ? 14 : 2),
+          bottomRight: Radius.circular(mine ? 2 : 14),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Royal.deep.withValues(alpha: mine ? 0.25 : 0.07),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

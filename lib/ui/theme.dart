@@ -1,51 +1,56 @@
 import 'package:flutter/material.dart';
 
-/// Royal palette: deep purple, gold accents, ivory backgrounds.
+/// "Wine & Gold" palette: deep wine, burnished gold and midnight navy on
+/// warm ivory paper. Solid colours and fine gold rules rather than glossy
+/// gradients and glows, for a classic, hand-set feel.
 class Royal {
-  static const deep = Color(0xFF1E0B44);
-  static const purple = Color(0xFF4B2A85);
-  static const violet = Color(0xFF6A43B0);
-  static const lavender = Color(0xFFC9B6F2);
-  static const gold = Color(0xFFD4AF37);
-  static const goldLight = Color(0xFFF1D98A);
-  static const ivory = Color(0xFFFBF8F3);
-  static const ink = Color(0xFF1C1530);
-  static const nightSurface = Color(0xFF140A29);
-  static const nightCard = Color(0xFF221440);
+  /// Darkest wine: app bars, navigation.
+  static const deep = Color(0xFF2B0716);
+
+  /// Wine: primary colour (buttons, your chat bubbles, headers).
+  static const purple = Color(0xFF6E1233);
+
+  /// Lighter wine for accents.
+  static const violet = Color(0xFF9B2B4E);
+
+  /// Rose: primary colour in dark mode (readable on dark wine).
+  static const lavender = Color(0xFFE9A8BB);
+
+  /// Midnight navy: dashboard header card and secondary accents.
+  static const navy = Color(0xFF0F2742);
+
+  static const gold = Color(0xFFC9A13B);
+  static const goldLight = Color(0xFFEBD293);
+  static const ivory = Color(0xFFF8F1E5);
+  static const ink = Color(0xFF231218);
+  static const nightSurface = Color(0xFF170810);
+  static const nightCard = Color(0xFF26101A);
 
   /// Money in / out colours that work on light and dark backgrounds.
   static Color income(BuildContext c) =>
       Theme.of(c).brightness == Brightness.dark
-      ? const Color(0xFF6FD3A0)
-      : const Color(0xFF1B7F52);
+      ? const Color(0xFF93D3AE)
+      : const Color(0xFF2D6A4F);
   static Color spend(BuildContext c) =>
       Theme.of(c).brightness == Brightness.dark
-      ? const Color(0xFFFF8A80)
-      : const Color(0xFFB3261E);
+      ? const Color(0xFFFF9A9A)
+      : const Color(0xFFA4161A);
 
-  static const gradient = LinearGradient(
-    colors: [Color(0xFF1E0B44), Color(0xFF3B1C74), Color(0xFF5B34A0)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-
-  static const goldGradient = LinearGradient(
-    colors: [Color(0xFFB8892B), Color(0xFFE9C766), Color(0xFFC79A33)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
+  /// Kept as "gradients" for existing call sites, but deliberately flat.
+  static const gradient = LinearGradient(colors: [deep, deep]);
+  static const goldGradient = LinearGradient(colors: [gold, gold]);
 
   static const chartColors = [
-    Color(0xFF5B34A0),
-    Color(0xFFD4AF37),
-    Color(0xFF2A9D8F),
-    Color(0xFFC0392B),
-    Color(0xFF3F51B5),
-    Color(0xFFD16BA5),
-    Color(0xFF1B7F52),
-    Color(0xFFE67E22),
-    Color(0xFF8E44AD),
-    Color(0xFF607D8B),
+    Color(0xFF6E1233), // wine
+    Color(0xFFC9A13B), // gold
+    Color(0xFF0F2742), // navy
+    Color(0xFFD9566F), // rose
+    Color(0xFF2E6F73), // teal
+    Color(0xFF7D4E9E), // plum
+    Color(0xFFB8682E), // copper
+    Color(0xFF5E7A3A), // olive
+    Color(0xFF4F6D8F), // slate blue
+    Color(0xFF8C7B6B), // taupe
   ];
 }
 
@@ -61,26 +66,32 @@ ThemeData royalTheme(Brightness brightness) {
     secondary: Royal.gold,
     onSecondary: Royal.ink,
     surface: dark ? Royal.nightSurface : Royal.ivory,
-    surfaceContainerLowest: dark ? const Color(0xFF0F071F) : Colors.white,
-    surfaceContainerLow: dark ? Royal.nightCard : Colors.white,
-    surfaceContainer: dark ? const Color(0xFF26174A) : const Color(0xFFF6F1E8),
+    surfaceContainerLowest: dark
+        ? const Color(0xFF10050B)
+        : const Color(0xFFFFFCF6),
+    surfaceContainerLow: dark ? Royal.nightCard : const Color(0xFFFFFAF1),
+    surfaceContainer: dark ? const Color(0xFF2E1420) : const Color(0xFFF3EADB),
     surfaceContainerHigh: dark
-        ? const Color(0xFF2C1B55)
-        : const Color(0xFFF1EADF),
+        ? const Color(0xFF381927)
+        : const Color(0xFFEEE3D0),
     surfaceContainerHighest: dark
-        ? const Color(0xFF34205F)
-        : const Color(0xFFEBE2D3),
+        ? const Color(0xFF431E2F)
+        : const Color(0xFFE7DAC3),
   );
   final goldHairline = Royal.gold.withValues(alpha: dark ? 0.35 : 0.45);
 
+  // Palatino-style serif everywhere (TeX Gyre Pagella, bundled in
+  // assets/fonts so it looks the same on every platform).
   final text = Typography.material2021(platform: TargetPlatform.android).black
       .apply(
-        bodyColor: dark ? Colors.white : Royal.ink,
-        displayColor: dark ? Colors.white : Royal.ink,
+        fontFamily: 'Pagella',
+        bodyColor: dark ? const Color(0xFFF6EBDD) : Royal.ink,
+        displayColor: dark ? const Color(0xFFF6EBDD) : Royal.ink,
       );
 
   return ThemeData(
     useMaterial3: true,
+    fontFamily: 'Pagella',
     colorScheme: scheme,
     scaffoldBackgroundColor: scheme.surface,
     textTheme: text.copyWith(
@@ -103,7 +114,8 @@ ThemeData royalTheme(Brightness brightness) {
       centerTitle: false,
       elevation: 0,
       titleTextStyle: TextStyle(
-        color: Colors.white,
+        fontFamily: 'Pagella',
+        color: Royal.goldLight,
         fontSize: 20,
         fontWeight: FontWeight.w700,
         letterSpacing: 0.6,
@@ -114,7 +126,7 @@ ThemeData royalTheme(Brightness brightness) {
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(12),
         side: BorderSide(color: goldHairline, width: 0.8),
       ),
     ),
@@ -122,8 +134,9 @@ ThemeData royalTheme(Brightness brightness) {
     chipTheme: ChipThemeData(
       backgroundColor: scheme.surfaceContainerLow,
       side: BorderSide(color: goldHairline),
-      shape: const StadiumBorder(),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       labelStyle: TextStyle(
+        fontFamily: 'Pagella',
         color: dark ? Colors.white : Royal.ink,
         fontWeight: FontWeight.w500,
       ),
@@ -134,8 +147,9 @@ ThemeData royalTheme(Brightness brightness) {
         backgroundColor: dark ? Royal.gold : Royal.purple,
         foregroundColor: dark ? Royal.ink : Colors.white,
         minimumSize: const Size(0, 48),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         textStyle: const TextStyle(
+          fontFamily: 'Pagella',
           fontWeight: FontWeight.w600,
           letterSpacing: 0.4,
         ),
@@ -146,7 +160,13 @@ ThemeData royalTheme(Brightness brightness) {
         minimumSize: const Size(0, 48),
         side: const BorderSide(color: Royal.gold, width: 1.2),
         foregroundColor: dark ? Royal.goldLight : Royal.purple,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        textStyle: const TextStyle(fontFamily: 'Pagella', fontSize: 15),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        textStyle: const TextStyle(fontFamily: 'Pagella', fontSize: 15),
       ),
     ),
     floatingActionButtonTheme: const FloatingActionButtonThemeData(
@@ -154,18 +174,21 @@ ThemeData royalTheme(Brightness brightness) {
       foregroundColor: Royal.ink,
     ),
     inputDecorationTheme: InputDecorationTheme(
+      hintStyle: const TextStyle(fontFamily: 'Pagella'),
+      labelStyle: const TextStyle(fontFamily: 'Pagella'),
+      helperStyle: const TextStyle(fontFamily: 'Pagella'),
       filled: true,
       fillColor: scheme.surfaceContainerLowest,
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(10),
         borderSide: BorderSide(color: goldHairline),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(10),
         borderSide: BorderSide(color: goldHairline),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(10),
         borderSide: const BorderSide(color: Royal.gold, width: 1.6),
       ),
     ),
@@ -216,7 +239,7 @@ ThemeData royalTheme(Brightness brightness) {
     ),
     snackBarTheme: const SnackBarThemeData(
       backgroundColor: Royal.deep,
-      contentTextStyle: TextStyle(color: Colors.white),
+      contentTextStyle: TextStyle(fontFamily: 'Pagella', color: Colors.white),
       behavior: SnackBarBehavior.floating,
     ),
   );
@@ -253,28 +276,32 @@ class RoyalEmblem extends StatelessWidget {
   final double size;
   const RoyalEmblem({super.key, this.size = 44});
 
+  /// A gold coin with a fine inner ring and a wine ₹, like a seal.
   @override
   Widget build(BuildContext context) {
     return Container(
       width: size,
       height: size,
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         shape: BoxShape.circle,
-        gradient: Royal.goldGradient,
-        boxShadow: [
-          BoxShadow(
-            color: Royal.gold.withValues(alpha: 0.35),
-            blurRadius: size / 3,
-          ),
-        ],
+        color: Royal.gold,
       ),
-      alignment: Alignment.center,
-      child: Text(
-        '₹',
-        style: TextStyle(
-          fontSize: size * 0.5,
-          color: Royal.deep,
-          fontWeight: FontWeight.w800,
+      padding: EdgeInsets.all(size * 0.07),
+      child: Container(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: Royal.deep, width: size * 0.025),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '₹',
+          style: TextStyle(
+            fontFamily: 'Pagella',
+            fontSize: size * 0.48,
+            color: Royal.purple,
+            fontWeight: FontWeight.w700,
+            height: 1.1,
+          ),
         ),
       ),
     );

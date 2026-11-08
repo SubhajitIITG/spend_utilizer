@@ -39,7 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       body: DecoratedBox(
-        decoration: const BoxDecoration(gradient: Royal.gradient),
+        decoration: const BoxDecoration(color: Royal.deep),
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(

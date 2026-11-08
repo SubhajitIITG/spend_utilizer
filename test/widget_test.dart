@@ -54,4 +54,42 @@ void main() {
     expect(find.text('🏦 1 banks'), findsOneWidget);
     await tester.pump(const Duration(seconds: 1)); // flush save timer
   });
+
+  testWidgets('clear chat keeps transactions', (tester) async {
+    final store = AppStore(storage: MemoryStorage());
+    await store.load();
+    await tester.pumpWidget(SpendUtilizerApp(store: store));
+    await tester.pumpAndSettle();
+    expect(find.text('Clear chat'), findsNothing); // nothing to clear yet
+
+    await tester.enterText(
+      find.byType(TextField).last,
+      'Rs.250.00 debited from A/c XX1234 on 05-11-26 to VPA '
+      'swiggy@axisbank (UPI Ref No 512345678901) -SBI',
+    );
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('✅ Yes, it\'s mine'));
+    await tester.pumpAndSettle();
+    expect(store.chat, isNotEmpty);
+
+    // Typed command opens the same confirmation; cancel keeps the chat.
+    await tester.enterText(find.byType(TextField).last, 'clear chat');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pumpAndSettle();
+    expect(find.text('Clear chat history?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(store.chat, isNotEmpty);
+
+    // Chip → confirm.
+    await tester.tap(find.text('Clear chat'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear chat'));
+    await tester.pumpAndSettle();
+    expect(store.chat, isEmpty);
+    expect(store.txns.length, 1);
+    expect(find.text('Track every rupee by chatting'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+  });
 }

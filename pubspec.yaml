@@ -65,6 +65,20 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # Palatino-style serif: TeX Gyre Pagella (GUST Font License / LPPL,
+  # see assets/fonts/GUST-FONT-LICENSE.txt).
+  fonts:
+    - family: Pagella
+      fonts:
+        - asset: assets/fonts/texgyrepagella-regular.otf
+        - asset: assets/fonts/texgyrepagella-italic.otf
+          style: italic
+        - asset: assets/fonts/texgyrepagella-bold.otf
+          weight: 700
+        - asset: assets/fonts/texgyrepagella-bolditalic.otf
+          weight: 700
+          style: italic
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

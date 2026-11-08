@@ -196,16 +196,10 @@ class _HeroCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        gradient: Royal.gradient,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Royal.gold.withValues(alpha: 0.7)),
-        boxShadow: [
-          BoxShadow(
-            color: Royal.deep.withValues(alpha: 0.35),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        // Midnight navy panel framed by a fine gold rule.
+        color: Royal.navy,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Royal.gold, width: 1.2),
       ),
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 18),
       child: Column(

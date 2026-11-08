@@ -25,6 +25,7 @@ for you:
 | 📊 **Dashboard** | Monthly spent / received / net, category pie chart, number of banks / cards / accounts, spend per card, who owes whom, reminders |
 | 🧾 **History** | Search and filter all entries. Tap one to edit or delete it |
 | 🔎 **Learns your merchants** | If you pay the same UPI ID / stall 3+ times in 30 days in small amounts (≤ ₹2,000) and the app can't tell what it is, it asks once: **a friend**, or which category (Food, Groceries…), plus an optional name like "Raju Tea Stall". Past and future payments are categorised automatically. Changing a payment's category by hand also teaches the app. Review everything under **Accounts → Merchants** |
+| 💸 **Payees** | Money sent to people (NEFT/IMPS/bank transfer, UPI to a person) is filed under **Payees**; filter it in History |
 | 🏦 **Accounts** | Rename a bank, give cards nicknames (e.g. "HDFC Millennia"), change the type, add accounts manually |
 | 📥 **Excel export** | Download icon. Saves a `.xlsx` with sheets for Transactions, Monthly Summary, Category Summary, Accounts, Lend & Borrow and Reminders |
 | 🔐 **Login & sync** | Sign in with **email + password**, a **phone (SMS) code**, or as a **guest**. Your data then syncs across all your devices. Works offline and catches up when you're back online |
