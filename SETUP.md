@@ -54,10 +54,9 @@ In **Project Settings** → **API Keys**, copy:
 Both are safe to put in the app. **Never** use the *secret* or
 *service_role* key.
 
-**For the apps built by GitHub Actions:** in the GitHub repo go to
-**Settings** → **Secrets and variables** → **Actions** → **New repository
-secret** and add `SUPABASE_URL` and `SUPABASE_KEY`. The next build will have
-login and sync turned on.
+**Put them in the app:** set both values as the defaults in
+`lib/config.dart` (this project already has them). Every build, including
+the ones GitHub Actions makes, then has login and sync turned on.
 
 **For running locally:**
 

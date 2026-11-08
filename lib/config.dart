@@ -10,16 +10,22 @@
 // rules in supabase/schema.sql, not by this key.
 // NEVER put the secret / service_role key here.
 //
-// If left empty, the app runs fully offline with no login.
+// If set to empty strings, the app runs fully offline with no login.
 
 class AppConfig {
   static const supabaseUrl = String.fromEnvironment(
     'SUPABASE_URL',
-    defaultValue: '',
+    defaultValue: 'https://ugzzzephftxfhgjyldma.supabase.co',
   );
+
+  /// Public "anon" key: safe to ship in the app (access is limited by the
+  /// row-level security rules in supabase/schema.sql).
   static const supabaseKey = String.fromEnvironment(
     'SUPABASE_KEY',
-    defaultValue: '',
+    defaultValue:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6'
+        'InVnenp6ZXBoZnR4ZmhnanlsZG1hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQxMDc3Mj'
+        'gsImV4cCI6MjEwOTY4MzcyOH0.fG0o8VUr_ZJl6N8ww9BoOn9dX8SU8ZjlkmC3UB3RykI',
   );
 
   /// Country code added to 10-digit phone numbers.
