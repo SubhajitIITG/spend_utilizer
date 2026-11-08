@@ -6,7 +6,10 @@ plugins {
 
 android {
     namespace = "com.spendutilizer.spend_utilizer"
-    compileSdk = flutter.compileSdkVersion
+    // 37: receive_sharing_intent (share-sheet support) requires compiling
+    // against Android 17 APIs. The app still runs on older Android versions
+    // (minSdk is unchanged).
+    compileSdk = maxOf(flutter.compileSdkVersion, 37)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
