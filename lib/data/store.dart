@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/models.dart';
 import '../services/sms_parser.dart';
+import '../services/sync_types.dart';
 
 /// Where the JSON data lives. Swappable so tests can use memory.
 abstract class Storage {
@@ -84,6 +85,24 @@ class AppStore extends ChangeNotifier {
   final List<ChatMessage> chat = [];
   bool loaded = false;
 
+  // ---- Sync bookkeeping (see services/sync_service.dart)
+
+  /// Records changed locally and not yet uploaded: "kind:id".
+  final Set<String> dirty = {};
+
+  /// Deleted records not yet uploaded: "kind:id" → time of deletion.
+  final Map<String, DateTime> tombstones = {};
+
+  /// Server cursor: we have downloaded everything synced before this.
+  String? syncCursor;
+
+  /// The signed-in user this local data belongs to (null = never synced).
+  String? ownerId;
+
+  /// Called after every local edit (not after applying downloaded data),
+  /// so the sync service can upload soon.
+  VoidCallback? onLocalChange;
+
   int _idCounter = 0;
   String newId() =>
       '${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
@@ -104,6 +123,14 @@ class AppStore extends ChangeNotifier {
             .map((e) => Reminder.fromJson(e as Map<String, dynamic>)));
         chat.addAll((j['chat'] as List? ?? [])
             .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>)));
+        final sync = j['sync'] as Map<String, dynamic>? ?? {};
+        dirty.addAll((sync['dirty'] as List? ?? []).cast<String>());
+        (sync['tombstones'] as Map<String, dynamic>? ?? {}).forEach((k, v) {
+          final d = DateTime.tryParse(v as String);
+          if (d != null) tombstones[k] = d.toUtc();
+        });
+        syncCursor = sync['cursor'] as String?;
+        ownerId = sync['ownerId'] as String?;
       }
     } catch (e) {
       debugPrint('Failed to load data: $e');
@@ -114,10 +141,33 @@ class AppStore extends ChangeNotifier {
 
   Timer? _saveTimer;
 
-  void _changed() {
+  /// [local]: the user changed something, so it should be uploaded.
+  void _changed({bool local = true}) {
     notifyListeners();
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 300), saveNow);
+    if (local) onLocalChange?.call();
+  }
+
+  void _touchAccount(Account a) {
+    a.updatedAt = DateTime.now().toUtc();
+    dirty.add(syncKey(SyncKind.account, a.id));
+  }
+
+  void _touchTxn(Txn t) {
+    t.updatedAt = DateTime.now().toUtc();
+    dirty.add(syncKey(SyncKind.txn, t.id));
+  }
+
+  void _touchReminder(Reminder r) {
+    r.updatedAt = DateTime.now().toUtc();
+    dirty.add(syncKey(SyncKind.reminder, r.id));
+  }
+
+  void _bury(SyncKind kind, String id) {
+    final k = syncKey(kind, id);
+    dirty.remove(k);
+    tombstones[k] = DateTime.now().toUtc();
   }
 
   Future<void> saveNow() async {
@@ -130,6 +180,13 @@ class AppStore extends ChangeNotifier {
       'txns': txns.map((t) => t.toJson()).toList(),
       'reminders': reminders.map((r) => r.toJson()).toList(),
       'chat': chat.map((c) => c.toJson()).toList(),
+      'sync': {
+        'dirty': dirty.toList(),
+        'tombstones':
+            tombstones.map((k, v) => MapEntry(k, v.toIso8601String())),
+        'cursor': syncCursor,
+        'ownerId': ownerId,
+      },
     });
     await storage.write(data);
   }
@@ -185,6 +242,7 @@ class AppStore extends ChangeNotifier {
     final created =
         Account(id: newId(), bank: bank, type: type, last4: last4);
     accounts.add(created);
+    _touchAccount(created);
     _changed();
     return (created, true);
   }
@@ -199,6 +257,7 @@ class AppStore extends ChangeNotifier {
 
   void addAccount(Account a) {
     accounts.add(a);
+    _touchAccount(a);
     _changed();
   }
 
@@ -208,21 +267,29 @@ class AppStore extends ChangeNotifier {
     if (nickname != null) a.nickname = nickname.trim();
     if (type != null) a.type = type;
     if (last4 != null) a.last4 = last4.trim();
+    _touchAccount(a);
     _changed();
   }
 
   /// Renames a bank across all its accounts, e.g. "Unknown Bank" → "Jana".
   void renameBank(String oldName, String newName) {
     for (final a in accounts) {
-      if (a.bank == oldName) a.bank = newName.trim();
+      if (a.bank == oldName) {
+        a.bank = newName.trim();
+        _touchAccount(a);
+      }
     }
     _changed();
   }
 
   void deleteAccount(Account a) {
     accounts.remove(a);
+    _bury(SyncKind.account, a.id);
     for (final t in txns) {
-      if (t.accountId == a.id) t.accountId = null;
+      if (t.accountId == a.id) {
+        t.accountId = null;
+        _touchTxn(t);
+      }
     }
     _changed();
   }
@@ -262,6 +329,7 @@ class AppStore extends ChangeNotifier {
       refNo: p.refNo,
     );
     txns.add(t);
+    _touchTxn(t);
     _changed();
     return SmsResult(SmsStatus.added,
         txn: t, account: account, newAccount: isNew);
@@ -269,21 +337,34 @@ class AppStore extends ChangeNotifier {
 
   void addTxn(Txn t) {
     txns.add(t);
+    _touchTxn(t);
     _changed();
   }
 
-  void updateTxn(Txn t) => _changed();
+  /// Call after changing fields of [t] directly.
+  void updateTxn(Txn t) {
+    _touchTxn(t);
+    _changed();
+  }
 
   void deleteTxn(Txn t) {
     txns.remove(t);
-    reminders.removeWhere((r) => r.txnId == t.id);
+    _bury(SyncKind.txn, t.id);
+    for (final r in reminders.where((r) => r.txnId == t.id).toList()) {
+      reminders.remove(r);
+      _bury(SyncKind.reminder, r.id);
+    }
     _changed();
   }
 
   void setSettled(Txn t, bool settled) {
     t.settled = settled;
+    _touchTxn(t);
     for (final r in reminders) {
-      if (r.txnId == t.id) r.done = settled;
+      if (r.txnId == t.id) {
+        r.done = settled;
+        _touchReminder(r);
+      }
     }
     _changed();
   }
@@ -292,16 +373,19 @@ class AppStore extends ChangeNotifier {
 
   void addReminder(Reminder r) {
     reminders.add(r);
+    _touchReminder(r);
     _changed();
   }
 
   void toggleReminder(Reminder r) {
     r.done = !r.done;
+    _touchReminder(r);
     _changed();
   }
 
   void deleteReminder(Reminder r) {
     reminders.remove(r);
+    _bury(SyncKind.reminder, r.id);
     _changed();
   }
 
@@ -311,14 +395,144 @@ class AppStore extends ChangeNotifier {
 
   // ------------------------------------------------------------------ chat
 
+  // Chat history stays on this device (it is not synced).
   void addChat(ChatMessage m) {
     chat.add(m);
-    _changed();
+    _changed(local: false);
   }
 
   void clearChat() {
     chat.clear();
-    _changed();
+    _changed(local: false);
+  }
+
+  // ------------------------------------------------------------------ sync
+
+  /// Records waiting to be uploaded.
+  List<SyncRecord> pendingRecords() {
+    final out = <SyncRecord>[];
+    for (final a in accounts) {
+      if (dirty.contains(syncKey(SyncKind.account, a.id))) {
+        out.add(SyncRecord(SyncKind.account, a.id, a.toJson(), a.updatedAt));
+      }
+    }
+    for (final t in txns) {
+      if (dirty.contains(syncKey(SyncKind.txn, t.id))) {
+        out.add(SyncRecord(SyncKind.txn, t.id, t.toJson(), t.updatedAt));
+      }
+    }
+    for (final r in reminders) {
+      if (dirty.contains(syncKey(SyncKind.reminder, r.id))) {
+        out.add(SyncRecord(SyncKind.reminder, r.id, r.toJson(), r.updatedAt));
+      }
+    }
+    tombstones.forEach((key, when) {
+      final (kind, id) = parseSyncKey(key);
+      if (kind != null) out.add(SyncRecord(kind, id, null, when));
+    });
+    return out;
+  }
+
+  /// Marks records as uploaded, unless they changed again meanwhile.
+  void markUploaded(List<SyncRecord> sent) {
+    for (final r in sent) {
+      final key = syncKey(r.kind, r.id);
+      if (r.deleted) {
+        if (tombstones[key] == r.updatedAt) tombstones.remove(key);
+      } else if (_localUpdatedAt(r.kind, r.id) == r.updatedAt) {
+        dirty.remove(key);
+      }
+    }
+    _changed(local: false);
+  }
+
+  DateTime? _localUpdatedAt(SyncKind kind, String id) => switch (kind) {
+        SyncKind.account => accountById(id)?.updatedAt,
+        SyncKind.txn => txnById(id)?.updatedAt,
+        SyncKind.reminder => _reminderById(id)?.updatedAt,
+      };
+
+  Reminder? _reminderById(String id) {
+    for (final r in reminders) {
+      if (r.id == id) return r;
+    }
+    return null;
+  }
+
+  /// Applies downloaded records. The newest edit wins.
+  void applyRemote(List<SyncRecord> records, String? newCursor) {
+    for (final r in records) {
+      final key = syncKey(r.kind, r.id);
+      final local = _localUpdatedAt(r.kind, r.id);
+      final buried = tombstones[key];
+      // Ignore anything older than what we have (or deleted) locally.
+      if (local != null && !r.updatedAt.isAfter(local)) continue;
+      if (buried != null && !r.updatedAt.isAfter(buried)) continue;
+      tombstones.remove(key);
+      dirty.remove(key);
+      _removeLocal(r.kind, r.id);
+      if (r.deleted || r.data == null) continue;
+      try {
+        switch (r.kind) {
+          case SyncKind.account:
+            accounts.add(Account.fromJson(r.data!)..updatedAt = r.updatedAt);
+          case SyncKind.txn:
+            txns.add(Txn.fromJson(r.data!)..updatedAt = r.updatedAt);
+          case SyncKind.reminder:
+            reminders.add(Reminder.fromJson(r.data!)..updatedAt = r.updatedAt);
+        }
+      } catch (e) {
+        debugPrint('Skipping bad record $key: $e');
+      }
+    }
+    if (newCursor != null) syncCursor = newCursor;
+    _changed(local: false);
+  }
+
+  void _removeLocal(SyncKind kind, String id) {
+    switch (kind) {
+      case SyncKind.account:
+        accounts.removeWhere((a) => a.id == id);
+      case SyncKind.txn:
+        txns.removeWhere((t) => t.id == id);
+      case SyncKind.reminder:
+        reminders.removeWhere((r) => r.id == id);
+    }
+  }
+
+  /// Links local data to a signed-in user. Data created before signing in
+  /// is uploaded to the new account; data from a different user is wiped.
+  void attachUser(String userId) {
+    if (ownerId == userId) return;
+    if (ownerId != null) {
+      clearAll();
+    } else {
+      for (final a in accounts) {
+        dirty.add(syncKey(SyncKind.account, a.id));
+      }
+      for (final t in txns) {
+        dirty.add(syncKey(SyncKind.txn, t.id));
+      }
+      for (final r in reminders) {
+        dirty.add(syncKey(SyncKind.reminder, r.id));
+      }
+    }
+    ownerId = userId;
+    syncCursor = null;
+    _changed(local: false);
+  }
+
+  /// Removes everything from this device (used on sign-out).
+  void clearAll() {
+    accounts.clear();
+    txns.clear();
+    reminders.clear();
+    chat.clear();
+    dirty.clear();
+    tombstones.clear();
+    syncCursor = null;
+    ownerId = null;
+    _changed(local: false);
   }
 
   // ----------------------------------------------------------------- stats

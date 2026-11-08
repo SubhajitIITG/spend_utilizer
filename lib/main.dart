@@ -1,27 +1,90 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'config.dart';
 import 'data/store.dart';
+import 'services/auth_service.dart';
+import 'services/supabase_backend.dart';
+import 'services/sync_service.dart';
 import 'ui/accounts_screen.dart';
 import 'ui/chat_screen.dart';
 import 'ui/dashboard_screen.dart';
+import 'ui/login_screen.dart';
 import 'ui/transactions_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final store = AppStore()..load();
-  runApp(SpendUtilizerApp(store: store));
+  final store = AppStore();
+  await store.load();
+
+  AuthService? auth;
+  if (AppConfig.cloudEnabled) {
+    try {
+      await Supabase.initialize(
+        url: AppConfig.supabaseUrl,
+        publishableKey: AppConfig.supabaseKey,
+      );
+      auth = AuthService(Supabase.instance.client.auth);
+    } catch (e) {
+      debugPrint('Cloud disabled, Supabase init failed: $e');
+    }
+  }
+  runApp(SpendUtilizerApp(store: store, auth: auth));
 }
 
-class SpendUtilizerApp extends StatelessWidget {
+class SpendUtilizerApp extends StatefulWidget {
   final AppStore store;
-  const SpendUtilizerApp({super.key, required this.store});
+
+  /// Null when cloud login/sync is not configured (offline-only mode).
+  final AuthService? auth;
+
+  const SpendUtilizerApp({super.key, required this.store, this.auth});
+
+  @override
+  State<SpendUtilizerApp> createState() => _SpendUtilizerAppState();
+}
+
+class _SpendUtilizerAppState extends State<SpendUtilizerApp> {
+  late final SyncService _sync = SyncService(widget.store);
+  String? _syncingFor;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.auth?.addListener(_onAuthChanged);
+    _onAuthChanged();
+  }
+
+  /// Starts/stops sync when the user signs in or out.
+  void _onAuthChanged() {
+    final uid = widget.auth?.user?.id;
+    if (uid == _syncingFor) return;
+    _syncingFor = uid;
+    if (uid == null) {
+      _sync.stop();
+    } else {
+      _sync.start(SupabaseSyncBackend(Supabase.instance.client), uid);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.auth?.removeListener(_onAuthChanged);
+    _sync.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     const seed = Color(0xFF1E6B52);
-    return ChangeNotifierProvider.value(
-      value: store,
+    final auth = widget.auth;
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: widget.store),
+        ChangeNotifierProvider.value(value: _sync),
+        ChangeNotifierProvider<AuthService?>.value(value: auth),
+      ],
       child: MaterialApp(
         title: 'Spend Utilizer',
         debugShowCheckedModeBanner: false,
@@ -35,7 +98,13 @@ class SpendUtilizerApp extends StatelessWidget {
               ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
           useMaterial3: true,
         ),
-        home: const HomeShell(),
+        home: auth == null
+            ? const HomeShell()
+            : ListenableBuilder(
+                listenable: auth,
+                builder: (_, _) =>
+                    auth.signedIn ? const HomeShell() : const LoginScreen(),
+              ),
       ),
     );
   }

@@ -1,6 +1,6 @@
 # Spend Utilizer
 
-A **chat-based expense tracker** for Android, Windows and Linux. Copy a bank or
+A **chat-based expense tracker** for Android, Windows, macOS and Linux. Copy a bank or
 UPI transaction SMS, paste it into the chat, and the app works out the details
 for you:
 
@@ -26,8 +26,11 @@ for you:
 | 🧾 **History** | Search and filter all entries. Tap one to edit or delete it |
 | 🏦 **Accounts** | Rename a bank, give cards nicknames (e.g. "HDFC Millennia"), change the type, add accounts manually |
 | 📥 **Excel export** | Download icon. Saves a `.xlsx` with sheets for Transactions, Monthly Summary, Category Summary, Accounts, Lend & Borrow and Reminders |
+| 🔐 **Login & sync** | Sign in with an **email code**, **phone (SMS) code**, or as a **guest**. Your data then syncs across all your devices. Works offline and catches up when you're back online |
 
-All data stays **on your device** in a local file. Nothing is uploaded.
+Data is always saved on the device first. Cloud sync is optional and needs a
+free Supabase project: see **[SETUP.md](SETUP.md)** (about 10 minutes).
+Without it, the app works offline with no login.
 
 ## Getting the app
 
@@ -39,6 +42,9 @@ tests the app and builds it for each platform. To download:
    - `spend-utilizer-android-apk`: install the `.apk` on your phone (allow
      "install from unknown sources").
    - `spend-utilizer-windows`: unzip and run `spend_utilizer.exe`.
+   - `spend-utilizer-macos`: unzip, then **right-click** "Spend Utilizer" and
+     choose **Open** the first time. The app isn't signed with an Apple
+     developer certificate yet, so macOS warns about it.
    - `spend-utilizer-linux`: unzip and run `./spend_utilizer`. Saving Excel
      files needs `zenity` (`sudo apt install zenity`).
 
@@ -48,22 +54,29 @@ Requires the [Flutter SDK](https://docs.flutter.dev/get-started/install) (stable
 
 ```bash
 flutter pub get
-flutter test          # parser, chat flows, Excel export, UI smoke test
-flutter run -d linux  # or: -d windows, or a connected Android phone
+flutter test          # parser, chat flows, sync, Excel export, UI smoke test
+flutter run -d linux  # or: -d windows, -d macos, or a connected Android phone
+# with login & sync (see SETUP.md):
+flutter run --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_KEY=...
 ```
 
 ### Project layout
 
 ```
 lib/
-  main.dart                  app shell + navigation (bottom bar on phones, side rail on desktop)
+  main.dart                  startup, login gate, navigation (bottom bar on phones, side rail on desktop)
+  config.dart                Supabase URL / key (via --dart-define)
   models/models.dart         Account, Txn, Reminder, ChatMessage
   data/store.dart            state + local JSON storage + statistics
   services/sms_parser.dart   bank/UPI SMS → structured transaction
   services/categories.dart   category lists + auto-categorisation keywords
   services/chat_engine.dart  chat conversation logic (guided flows)
   services/excel_export.dart .xlsx statement builder
-  ui/                        chat, dashboard, history, accounts, editors
+  services/auth_service.dart email / phone / guest login (Supabase Auth)
+  services/sync_service.dart upload local changes, download remote ones, newest edit wins
+  services/supabase_backend.dart  cloud storage for sync
+  ui/                        chat, dashboard, history, accounts, login, account & sync
+supabase/schema.sql          database table + row-level security (run once)
 test/                        unit + widget tests
 ```
 

@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../services/categories.dart';
 import '../services/chat_engine.dart';
 import '../util/format.dart';
+import 'profile_screen.dart';
 import 'txn_editor.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -101,6 +102,7 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         title: const Text('Spend Utilizer'),
         actions: [
+          const SyncStatusButton(),
           PopupMenuButton<String>(
             onSelected: (v) {
               if (v == 'clear') store.clearChat();

@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../services/categories.dart';
 import '../util/format.dart';
 import 'export_action.dart';
+import 'profile_screen.dart';
 
 const _chartColors = [
   Color(0xFF1E6B52), Color(0xFFE07A5F), Color(0xFF3D5A80), Color(0xFFF2CC8F),
@@ -38,6 +39,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: const Text('Dashboard'),
         actions: [
+          const SyncStatusButton(),
           IconButton(
             tooltip: 'Download Excel statement',
             icon: const Icon(Icons.file_download_outlined),

@@ -1,12 +1,21 @@
 name: Build apps
 
-# Runs the tests, then builds Android, Windows and Linux versions.
+# Runs the tests, then builds Android, Windows, macOS and Linux versions.
 # Download the results from the "Artifacts" section of each workflow run.
+#
+# Login & sync: add repository secrets SUPABASE_URL and SUPABASE_KEY
+# (Settings → Secrets and variables → Actions). Without them the apps are
+# built in offline-only mode.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+
+env:
+  CLOUD_DEFINES: >-
+    --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+    --dart-define=SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
 
 jobs:
   test:
@@ -35,7 +44,7 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter build apk --release
+      - run: flutter build apk --release $CLOUD_DEFINES
       - uses: actions/upload-artifact@v4
         with:
           name: spend-utilizer-android-apk
@@ -51,11 +60,32 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter build windows --release
+      - run: flutter build windows --release $CLOUD_DEFINES
+        shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: spend-utilizer-windows
           path: build/windows/x64/runner/Release/
+
+  macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build macos --release $CLOUD_DEFINES
+      - name: Zip the app
+        run: |
+          cd build/macos/Build/Products/Release
+          ditto -c -k --sequesterRsrc --keepParent "Spend Utilizer.app" "$GITHUB_WORKSPACE/SpendUtilizer-macOS.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spend-utilizer-macos
+          path: SpendUtilizer-macOS.zip
 
   linux:
     needs: test
@@ -70,7 +100,7 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter build linux --release
+      - run: flutter build linux --release $CLOUD_DEFINES
       - uses: actions/upload-artifact@v4
         with:
           name: spend-utilizer-linux

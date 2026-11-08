@@ -32,6 +32,10 @@ extension AccountTypeX on AccountType {
       this == AccountType.creditCard || this == AccountType.debitCard;
 }
 
+DateTime _parseUpdated(Object? v) =>
+    DateTime.tryParse(v as String? ?? '')?.toUtc() ??
+    DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+
 T _enumByName<T extends Enum>(List<T> values, Object? name, T fallback) {
   for (final v in values) {
     if (v.name == name) return v;
@@ -51,13 +55,17 @@ class Account {
   /// User-editable display name, e.g. "HDFC Millennia". Empty = auto name.
   String nickname;
 
+  /// Last local change (UTC). Used to merge edits from several devices.
+  DateTime updatedAt;
+
   Account({
     required this.id,
     required this.bank,
     required this.type,
     required this.last4,
     this.nickname = '',
-  });
+    DateTime? updatedAt,
+  }) : updatedAt = updatedAt ?? DateTime.now().toUtc();
 
   String get displayName {
     if (nickname.trim().isNotEmpty) return nickname.trim();
@@ -76,6 +84,7 @@ class Account {
         'type': type.name,
         'last4': last4,
         'nickname': nickname,
+        'updatedAt': updatedAt.toIso8601String(),
       };
 
   factory Account.fromJson(Map<String, dynamic> j) => Account(
@@ -84,6 +93,7 @@ class Account {
         type: _enumByName(AccountType.values, j['type'], AccountType.savings),
         last4: j['last4'] as String? ?? '',
         nickname: j['nickname'] as String? ?? '',
+        updatedAt: _parseUpdated(j['updatedAt']),
       );
 }
 
@@ -107,6 +117,7 @@ class Txn {
   /// For lend/borrow: whether the money has been returned.
   bool settled;
   DateTime? dueDate;
+  DateTime updatedAt;
 
   Txn({
     required this.id,
@@ -122,7 +133,8 @@ class Txn {
     this.refNo = '',
     this.settled = false,
     this.dueDate,
-  });
+    DateTime? updatedAt,
+  }) : updatedAt = updatedAt ?? DateTime.now().toUtc();
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -138,6 +150,7 @@ class Txn {
         'refNo': refNo,
         'settled': settled,
         'dueDate': dueDate?.toIso8601String(),
+        'updatedAt': updatedAt.toIso8601String(),
       };
 
   factory Txn.fromJson(Map<String, dynamic> j) => Txn(
@@ -154,6 +167,7 @@ class Txn {
         refNo: j['refNo'] as String? ?? '',
         settled: j['settled'] as bool? ?? false,
         dueDate: DateTime.tryParse(j['dueDate'] as String? ?? ''),
+        updatedAt: _parseUpdated(j['updatedAt']),
       );
 }
 
@@ -166,6 +180,7 @@ class Reminder {
 
   /// Linked lend/borrow transaction, if any.
   String? txnId;
+  DateTime updatedAt;
 
   Reminder({
     required this.id,
@@ -174,7 +189,8 @@ class Reminder {
     required this.dueDate,
     this.done = false,
     this.txnId,
-  });
+    DateTime? updatedAt,
+  }) : updatedAt = updatedAt ?? DateTime.now().toUtc();
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -183,6 +199,7 @@ class Reminder {
         'dueDate': dueDate.toIso8601String(),
         'done': done,
         'txnId': txnId,
+        'updatedAt': updatedAt.toIso8601String(),
       };
 
   factory Reminder.fromJson(Map<String, dynamic> j) => Reminder(
@@ -193,6 +210,7 @@ class Reminder {
             DateTime.tryParse(j['dueDate'] as String? ?? '') ?? DateTime.now(),
         done: j['done'] as bool? ?? false,
         txnId: j['txnId'] as String?,
+        updatedAt: _parseUpdated(j['updatedAt']),
       );
 }
 
