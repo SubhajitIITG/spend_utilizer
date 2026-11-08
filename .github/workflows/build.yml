@@ -4,9 +4,14 @@ name: Build apps
 # Download the results from the "Artifacts" section of each workflow run.
 #
 # Login & sync settings are built in (lib/config.dart).
+#
+# Releases: pushing a version tag (e.g. v1.0.0) also publishes a GitHub
+# Release with the four installers attached, downloadable without a
+# GitHub account once the repository is public.
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -42,6 +47,16 @@ jobs:
         with:
           name: spend-utilizer-android-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+      - name: Package for release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/SpendUtilizer-${GITHUB_REF_NAME}-android.apk"
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: release-android
+          path: dist/
 
   windows:
     needs: test
@@ -59,6 +74,18 @@ jobs:
         with:
           name: spend-utilizer-windows
           path: build/windows/x64/runner/Release/
+      - name: Package for release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item -Recurse build/windows/x64/runner/Release "Spend Utilizer"
+          Compress-Archive -Path "Spend Utilizer" -DestinationPath "dist/SpendUtilizer-$env:GITHUB_REF_NAME-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: release-windows
+          path: dist/
 
   macos:
     needs: test
@@ -79,6 +106,16 @@ jobs:
         with:
           name: spend-utilizer-macos
           path: SpendUtilizer-macOS.zip
+      - name: Package for release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir -p dist
+          cp SpendUtilizer-macOS.zip "dist/SpendUtilizer-${GITHUB_REF_NAME}-macos.zip"
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: release-macos
+          path: dist/
 
   linux:
     needs: test
@@ -98,3 +135,36 @@ jobs:
         with:
           name: spend-utilizer-linux
           path: build/linux/x64/release/bundle/
+      - name: Package for release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          # tar keeps the "executable" permission (zip downloads lose it).
+          mkdir -p dist
+          cp -r build/linux/x64/release/bundle spend-utilizer
+          tar -czf "dist/SpendUtilizer-${GITHUB_REF_NAME}-linux-x64.tar.gz" spend-utilizer
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: release-linux
+          path: dist/
+
+  release:
+    # Only for version tags, after all four apps built.
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [android, windows, macos, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - run: ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Spend Utilizer ${{ github.ref_name }}
+          body_path: .github/RELEASE_NOTES.md
+          files: dist/*
