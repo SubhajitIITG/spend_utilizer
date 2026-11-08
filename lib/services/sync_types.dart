@@ -1,6 +1,6 @@
 // Types shared by the store and the sync service.
 
-enum SyncKind { account, txn, reminder }
+enum SyncKind { account, txn, reminder, merchant }
 
 String syncKey(SyncKind kind, String id) => '${kind.name}:$id';
 

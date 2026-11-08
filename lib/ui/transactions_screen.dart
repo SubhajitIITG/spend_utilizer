@@ -141,7 +141,9 @@ class TxnTile extends StatelessWidget {
     final acc = store.accountById(txn.accountId);
     final scheme = Theme.of(context).colorScheme;
     final out = txn.type.isOutflow;
-    final title = txn.counterparty.isNotEmpty ? txn.counterparty : txn.category;
+    final title = txn.counterparty.isNotEmpty
+        ? store.merchantLabel(txn.counterparty)
+        : txn.category;
     final subtitle = [
       formatTxnDate(txn.date),
       if (txn.counterparty.isNotEmpty) txn.category,

@@ -89,7 +89,7 @@ class ExcelExporter {
         _t(a?.bank ?? ''),
         _t(a?.type.label ?? ''),
         _t(a?.last4 ?? ''),
-        _t(t.counterparty),
+        _t(store.merchantLabel(t.counterparty)),
         _t(t.note),
         _t(t.source == 'sms' ? 'Bank SMS' : 'Manual'),
         _t(t.refNo),

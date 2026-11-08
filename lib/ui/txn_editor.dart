@@ -77,15 +77,20 @@ class _TxnEditorState extends State<_TxnEditor> {
       return;
     }
     final store = context.read<AppStore>();
+    final categoryChanged = _category != widget.txn.category;
     final t = widget.txn
       ..type = _type
       ..amount = v
-      ..category = _category
       ..accountId = _accountId
       ..counterparty = _who.text.trim()
       ..note = _note.text.trim()
       ..date = _date;
-    store.updateTxn(t);
+    if (categoryChanged) {
+      // Also teaches the app this merchant's category.
+      store.recategorize(t, _category);
+    } else {
+      store.updateTxn(t);
+    }
     if (t.type == TxnType.lend || t.type == TxnType.borrow) {
       store.setSettled(t, _settled);
     }

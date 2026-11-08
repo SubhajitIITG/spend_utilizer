@@ -116,6 +116,10 @@ class Txn {
 
   /// For lend/borrow: whether the money has been returned.
   bool settled;
+
+  /// True once the user picked the category themselves. Merchant rules
+  /// never override such a choice.
+  bool userCategorized;
   DateTime? dueDate;
   DateTime updatedAt;
 
@@ -132,6 +136,7 @@ class Txn {
     this.rawMessage = '',
     this.refNo = '',
     this.settled = false,
+    this.userCategorized = false,
     this.dueDate,
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now().toUtc();
@@ -149,6 +154,7 @@ class Txn {
     'rawMessage': rawMessage,
     'refNo': refNo,
     'settled': settled,
+    'userCategorized': userCategorized,
     'dueDate': dueDate?.toIso8601String(),
     'updatedAt': updatedAt.toIso8601String(),
   };
@@ -166,6 +172,7 @@ class Txn {
     rawMessage: j['rawMessage'] as String? ?? '',
     refNo: j['refNo'] as String? ?? '',
     settled: j['settled'] as bool? ?? false,
+    userCategorized: j['userCategorized'] as bool? ?? false,
     dueDate: DateTime.tryParse(j['dueDate'] as String? ?? ''),
     updatedAt: _parseUpdated(j['updatedAt']),
   );
@@ -246,3 +253,63 @@ class ChatMessage {
     txnId: j['txnId'] as String?,
   );
 }
+
+/// What the user told us about a merchant / UPI ID they pay regularly,
+/// e.g. "raju.tea@ybl" is "Raju Tea Stall" in Food & Dining.
+class MerchantRule {
+  /// Normalised counterparty (see [merchantKey]); also the record id.
+  final String key;
+
+  /// Category for payments to this merchant; empty = not decided yet.
+  String category;
+
+  /// Friendly name shown instead of the raw UPI ID / merchant text.
+  String alias;
+
+  /// A friend or family member rather than a shop.
+  bool isPerson;
+
+  /// User said "Don't ask again".
+  bool neverAsk;
+
+  /// User said "Ask me later": don't ask before this time.
+  DateTime? askAfter;
+
+  DateTime updatedAt;
+
+  MerchantRule({
+    required this.key,
+    this.category = '',
+    this.alias = '',
+    this.isPerson = false,
+    this.neverAsk = false,
+    this.askAfter,
+    DateTime? updatedAt,
+  }) : updatedAt = updatedAt ?? DateTime.now().toUtc();
+
+  bool get decided => category.isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+    'key': key,
+    'category': category,
+    'alias': alias,
+    'isPerson': isPerson,
+    'neverAsk': neverAsk,
+    'askAfter': askAfter?.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+  };
+
+  factory MerchantRule.fromJson(Map<String, dynamic> j) => MerchantRule(
+    key: j['key'] as String,
+    category: j['category'] as String? ?? '',
+    alias: j['alias'] as String? ?? '',
+    isPerson: j['isPerson'] as bool? ?? false,
+    neverAsk: j['neverAsk'] as bool? ?? false,
+    askAfter: DateTime.tryParse(j['askAfter'] as String? ?? ''),
+    updatedAt: _parseUpdated(j['updatedAt']),
+  );
+}
+
+/// "  Raju.Tea@YBL " → "raju.tea@ybl". Used to match payments to a merchant.
+String merchantKey(String counterparty) =>
+    counterparty.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');

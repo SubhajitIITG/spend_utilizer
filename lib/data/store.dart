@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/models.dart';
+import '../services/categories.dart';
 import '../services/sms_parser.dart';
 import '../services/sync_types.dart';
 
@@ -86,7 +87,38 @@ class PersonBalance {
   const PersonBalance(this.person, this.amount);
 }
 
+/// A merchant the user pays regularly that we could not categorise.
+class MerchantSuggestion {
+  final String key;
+
+  /// The counterparty as it appears on the latest payment.
+  final String label;
+  final int count;
+  final double total;
+  final double minAmount;
+  final double maxAmount;
+  final int days;
+  const MerchantSuggestion({
+    required this.key,
+    required this.label,
+    required this.count,
+    required this.total,
+    required this.minAmount,
+    required this.maxAmount,
+    required this.days,
+  });
+}
+
 class AppStore extends ChangeNotifier {
+  /// "Regular": at least this many payments to one merchant…
+  static const regularMinCount = 3;
+
+  /// …within this many days…
+  static const regularWindowDays = 30;
+
+  /// …each no bigger than this (small everyday payments).
+  static const regularMaxAmount = 2000.0;
+
   final Storage storage;
   AppStore({Storage? storage}) : storage = storage ?? FileStorage();
 
@@ -94,6 +126,9 @@ class AppStore extends ChangeNotifier {
   final List<Txn> txns = [];
   final List<Reminder> reminders = [];
   final List<ChatMessage> chat = [];
+
+  /// What the user told us about merchants, keyed by [merchantKey].
+  final Map<String, MerchantRule> merchants = {};
   bool loaded = false;
 
   // ---- Sync bookkeeping (see services/sync_service.dart)
@@ -146,6 +181,10 @@ class AppStore extends ChangeNotifier {
             (e) => ChatMessage.fromJson(e as Map<String, dynamic>),
           ),
         );
+        for (final e in (j['merchants'] as List? ?? [])) {
+          final m = MerchantRule.fromJson(e as Map<String, dynamic>);
+          merchants[m.key] = m;
+        }
         final sync = j['sync'] as Map<String, dynamic>? ?? {};
         dirty.addAll((sync['dirty'] as List? ?? []).cast<String>());
         (sync['tombstones'] as Map<String, dynamic>? ?? {}).forEach((k, v) {
@@ -187,6 +226,11 @@ class AppStore extends ChangeNotifier {
     dirty.add(syncKey(SyncKind.reminder, r.id));
   }
 
+  void _touchMerchant(MerchantRule m) {
+    m.updatedAt = DateTime.now().toUtc();
+    dirty.add(syncKey(SyncKind.merchant, m.key));
+  }
+
   void _bury(SyncKind kind, String id) {
     final k = syncKey(kind, id);
     dirty.remove(k);
@@ -203,6 +247,7 @@ class AppStore extends ChangeNotifier {
       'txns': txns.map((t) => t.toJson()).toList(),
       'reminders': reminders.map((r) => r.toJson()).toList(),
       'chat': chat.map((c) => c.toJson()).toList(),
+      'merchants': merchants.values.map((m) => m.toJson()).toList(),
       'sync': {
         'dirty': dirty.toList(),
         'tombstones': tombstones.map(
@@ -350,11 +395,16 @@ class AppStore extends ChangeNotifier {
       p.accountType,
       p.last4,
     );
+    // A category the user taught us for this merchant beats the guess.
+    final rule = merchants[merchantKey(p.counterparty)];
+    final category = p.type == TxnType.debit && (rule?.decided ?? false)
+        ? rule!.category
+        : p.category;
     final t = Txn(
       id: newId(),
       type: p.type,
       amount: p.amount,
-      category: p.category,
+      category: category,
       accountId: account.id,
       counterparty: p.counterparty,
       date: p.date,
@@ -372,6 +422,127 @@ class AppStore extends ChangeNotifier {
       newAccount: isNew,
       dateFound: p.dateFound,
     );
+  }
+
+  // -------------------------------------------------------------- merchants
+
+  MerchantRule? merchantRule(String counterparty) =>
+      merchants[merchantKey(counterparty)];
+
+  /// Display name for a merchant: the user's alias if they gave one.
+  String merchantLabel(String counterparty) {
+    final alias = merchantRule(counterparty)?.alias ?? '';
+    return alias.isNotEmpty ? alias : counterparty;
+  }
+
+  /// Merchants paid regularly in small amounts whose category we couldn't
+  /// work out, and the user hasn't told us about yet. Most frequent first.
+  List<MerchantSuggestion> merchantsToReview({DateTime? now}) {
+    now ??= DateTime.now();
+    final since = now.subtract(const Duration(days: regularWindowDays));
+    final groups = <String, List<Txn>>{};
+    for (final t in txns) {
+      if (t.type != TxnType.debit || t.counterparty.trim().isEmpty) continue;
+      if (t.date.isBefore(since) || t.amount > regularMaxAmount) continue;
+      groups.putIfAbsent(merchantKey(t.counterparty), () => []).add(t);
+    }
+    final out = <MerchantSuggestion>[];
+    groups.forEach((key, list) {
+      if (list.length < regularMinCount) return;
+      final rule = merchants[key];
+      if (rule != null) {
+        if (rule.decided || rule.neverAsk) return;
+        if (rule.askAfter != null && now!.isBefore(rule.askAfter!)) return;
+      }
+      // Only ask when we're unsure: most payments landed in a vague
+      // category and the user hasn't categorised them themselves.
+      final unclear = list.where(
+        (t) => !t.userCategorized && unclearCategories.contains(t.category),
+      );
+      if (unclear.length * 2 < list.length) return;
+      list.sort((a, b) => a.date.compareTo(b.date));
+      final amounts = list.map((t) => t.amount);
+      out.add(
+        MerchantSuggestion(
+          key: key,
+          label: list.last.counterparty.trim(),
+          count: list.length,
+          total: amounts.fold(0.0, (a, b) => a + b),
+          minAmount: amounts.reduce((a, b) => a < b ? a : b),
+          maxAmount: amounts.reduce((a, b) => a > b ? a : b),
+          days: list.last.date.difference(list.first.date).inDays + 1,
+        ),
+      );
+    });
+    out.sort((a, b) => b.count.compareTo(a.count));
+    return out;
+  }
+
+  /// Saves what a merchant is and recategorises its payments that the user
+  /// hasn't categorised by hand. Returns how many payments changed.
+  int setMerchantCategory(
+    String counterparty,
+    String category, {
+    String? alias,
+    bool? isPerson,
+  }) {
+    final key = merchantKey(counterparty);
+    final rule = merchants.putIfAbsent(key, () => MerchantRule(key: key));
+    rule.category = category;
+    if (alias != null) rule.alias = alias.trim();
+    if (isPerson != null) rule.isPerson = isPerson;
+    rule.askAfter = null;
+    _touchMerchant(rule);
+    var changed = 0;
+    for (final t in txns) {
+      if (t.type != TxnType.debit || t.userCategorized) continue;
+      if (merchantKey(t.counterparty) != key || t.category == category) {
+        continue;
+      }
+      t.category = category;
+      _touchTxn(t);
+      changed++;
+    }
+    _changed();
+    return changed;
+  }
+
+  void setMerchantAlias(String counterparty, String alias) {
+    final key = merchantKey(counterparty);
+    final rule = merchants.putIfAbsent(key, () => MerchantRule(key: key));
+    rule.alias = alias.trim();
+    _touchMerchant(rule);
+    _changed();
+  }
+
+  void snoozeMerchant(String counterparty, {Duration? forHow}) {
+    final key = merchantKey(counterparty);
+    final rule = merchants.putIfAbsent(key, () => MerchantRule(key: key));
+    rule.askAfter = DateTime.now().add(forHow ?? const Duration(days: 7));
+    _touchMerchant(rule);
+    _changed();
+  }
+
+  void neverAskMerchant(String counterparty) {
+    final key = merchantKey(counterparty);
+    final rule = merchants.putIfAbsent(key, () => MerchantRule(key: key));
+    rule.neverAsk = true;
+    _touchMerchant(rule);
+    _changed();
+  }
+
+  /// The user picked a category for one payment by hand: remember it for
+  /// that merchant and apply it to the merchant's other auto-categorised
+  /// payments. Returns how many other payments changed.
+  int recategorize(Txn t, String category) {
+    t.category = category;
+    t.userCategorized = true;
+    _touchTxn(t);
+    if (t.type == TxnType.debit && t.counterparty.trim().isNotEmpty) {
+      return setMerchantCategory(t.counterparty, category);
+    }
+    _changed();
+    return 0;
   }
 
   void addTxn(Txn t) {
@@ -465,6 +636,11 @@ class AppStore extends ChangeNotifier {
         out.add(SyncRecord(SyncKind.reminder, r.id, r.toJson(), r.updatedAt));
       }
     }
+    for (final m in merchants.values) {
+      if (dirty.contains(syncKey(SyncKind.merchant, m.key))) {
+        out.add(SyncRecord(SyncKind.merchant, m.key, m.toJson(), m.updatedAt));
+      }
+    }
     tombstones.forEach((key, when) {
       final (kind, id) = parseSyncKey(key);
       if (kind != null) out.add(SyncRecord(kind, id, null, when));
@@ -489,6 +665,7 @@ class AppStore extends ChangeNotifier {
     SyncKind.account => accountById(id)?.updatedAt,
     SyncKind.txn => txnById(id)?.updatedAt,
     SyncKind.reminder => _reminderById(id)?.updatedAt,
+    SyncKind.merchant => merchants[id]?.updatedAt,
   };
 
   Reminder? _reminderById(String id) {
@@ -519,6 +696,9 @@ class AppStore extends ChangeNotifier {
             txns.add(Txn.fromJson(r.data!)..updatedAt = r.updatedAt);
           case SyncKind.reminder:
             reminders.add(Reminder.fromJson(r.data!)..updatedAt = r.updatedAt);
+          case SyncKind.merchant:
+            final m = MerchantRule.fromJson(r.data!)..updatedAt = r.updatedAt;
+            merchants[m.key] = m;
         }
       } catch (e) {
         debugPrint('Skipping bad record $key: $e');
@@ -536,6 +716,8 @@ class AppStore extends ChangeNotifier {
         txns.removeWhere((t) => t.id == id);
       case SyncKind.reminder:
         reminders.removeWhere((r) => r.id == id);
+      case SyncKind.merchant:
+        merchants.remove(id);
     }
   }
 
@@ -555,6 +737,9 @@ class AppStore extends ChangeNotifier {
       for (final r in reminders) {
         dirty.add(syncKey(SyncKind.reminder, r.id));
       }
+      for (final m in merchants.values) {
+        dirty.add(syncKey(SyncKind.merchant, m.key));
+      }
     }
     ownerId = userId;
     syncCursor = null;
@@ -567,6 +752,7 @@ class AppStore extends ChangeNotifier {
     txns.clear();
     reminders.clear();
     chat.clear();
+    merchants.clear();
     dirty.clear();
     tombstones.clear();
     syncCursor = null;

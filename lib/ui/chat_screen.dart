@@ -23,7 +23,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final _focus = FocusNode();
   ChatEngine? _engine;
 
-  ChatEngine get engine => _engine ??= ChatEngine(context.read<AppStore>());
+  ChatEngine get engine =>
+      _engine ??= ChatEngine(context.read<AppStore>())..resumePendingQuestion();
 
   @override
   void dispose() {
@@ -521,9 +522,19 @@ class _TxnActions extends StatelessWidget {
               label: const Text('Category'),
               onPressed: () async {
                 final c = await pickCategory(context, txn.type, txn.category);
-                if (c != null) {
-                  txn.category = c;
-                  store.updateTxn(txn);
+                if (c == null || !context.mounted) return;
+                final others = store.recategorize(txn, c);
+                if (others > 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Also moved $others other payment'
+                        '${others == 1 ? '' : 's'} to '
+                        '"${store.merchantLabel(txn.counterparty)}" into $c. '
+                        'Future ones will follow.',
+                      ),
+                    ),
+                  );
                 }
               },
             ),

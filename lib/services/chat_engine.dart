@@ -12,7 +12,17 @@ import '../util/format.dart';
 import 'categories.dart';
 import 'sms_parser.dart';
 
-enum ChatFlow { none, debit, credit, lend, borrow, reminder }
+enum ChatFlow {
+  none,
+  debit,
+  credit,
+  lend,
+  borrow,
+  reminder,
+
+  /// Bot-initiated: "you pay X regularly, what is it?"
+  merchant,
+}
 
 enum InputKind { text, amount, date }
 
@@ -24,6 +34,7 @@ extension ChatFlowX on ChatFlow {
     ChatFlow.lend => 'Lend',
     ChatFlow.borrow => 'Borrow',
     ChatFlow.reminder => 'Reminder',
+    ChatFlow.merchant => 'Regular payment',
   };
   String get emoji => switch (this) {
     ChatFlow.none => '📋',
@@ -32,6 +43,7 @@ extension ChatFlowX on ChatFlow {
     ChatFlow.lend => '🤝',
     ChatFlow.borrow => '🙏',
     ChatFlow.reminder => '⏰',
+    ChatFlow.merchant => '🔎',
   };
 }
 
@@ -44,12 +56,17 @@ enum _Step {
   dueDate,
   note,
   title,
+  merchantKind,
+  merchantName,
   done,
 }
 
 const cancelOption = 'Cancel';
 const skipOption = 'Skip';
 const cashOption = 'Cash';
+const personOption = '👤 A friend / person';
+const askLaterOption = 'Ask me later';
+const neverAskOption = 'Don\'t ask again';
 
 class ChatEngine {
   final AppStore store;
@@ -68,6 +85,8 @@ class ChatEngine {
   String _title = '';
   DateTime? _due;
   DateTime? _when;
+  MerchantSuggestion? _merchant;
+  bool _merchantIsPerson = false;
 
   /// Maps the account option labels shown to the user to account ids.
   final Map<String, String> _accountOptions = {};
@@ -95,6 +114,8 @@ class ChatEngine {
       _Step.txnDate => 'e.g. 5-11-2026, 5 Nov, yesterday',
       _Step.note => 'Add a note (optional)',
       _Step.title => 'What should I remind you about?',
+      _Step.merchantKind => 'Pick what this is, or type a category',
+      _Step.merchantName => 'e.g. Raju Tea Stall (optional)',
       _Step.done => '',
     };
   }
@@ -115,6 +136,19 @@ class ChatEngine {
       _Step.txnDate => ['Today', 'Yesterday', '2 days ago'],
       _Step.note => [skipOption],
       _Step.person => _knownPeople(),
+      _Step.merchantKind => [
+        personOption,
+        ...debitCategories
+            .where(
+              (c) =>
+                  c.name != friendsCategory &&
+                  !unclearCategories.contains(c.name),
+            )
+            .map((c) => '${c.emoji} ${c.name}'),
+        askLaterOption,
+        neverAskOption,
+      ],
+      _Step.merchantName => [skipOption],
       _ => <String>[],
     };
     return [...opts, cancelOption];
@@ -170,6 +204,7 @@ class ChatEngine {
         _Step.note,
       ],
       ChatFlow.reminder => [_Step.title, _Step.amount, _Step.dueDate],
+      ChatFlow.merchant => [_Step.merchantKind, _Step.merchantName],
       ChatFlow.none => [],
     };
     if (_steps.isEmpty) return [];
@@ -179,14 +214,76 @@ class ChatEngine {
 
   void cancel() => _reset();
 
+  /// Starts asking about a regularly-paid merchant.
+  List<ChatMessage> reviewMerchant(MerchantSuggestion m) {
+    _reset();
+    flow = ChatFlow.merchant;
+    _merchant = m;
+    _steps = [_Step.merchantKind, _Step.merchantName];
+    _step = _steps.first;
+    return [_bot(_question())];
+  }
+
+  /// After an app restart: if the last chat message is an unanswered
+  /// question about a merchant, pick that question up again.
+  void resumePendingQuestion() {
+    if (active || store.chat.isEmpty) return;
+    final last = store.chat.last;
+    if (last.fromUser || !last.text.startsWith('🔎')) return;
+    for (final m in store.merchantsToReview()) {
+      if (last.text.contains('"${m.label}"')) {
+        flow = ChatFlow.merchant;
+        _merchant = m;
+        _steps = [_Step.merchantKind, _Step.merchantName];
+        _step = _steps.first;
+        return;
+      }
+    }
+  }
+
+  /// If a regular, uncategorised merchant exists, starts asking about it.
+  List<ChatMessage> _maybeAskAboutMerchant() {
+    if (active) return const [];
+    final list = store.merchantsToReview();
+    return list.isEmpty ? const [] : reviewMerchant(list.first);
+  }
+
   /// Handles whatever the user typed or tapped.
   List<ChatMessage> handle(String input) {
     final text = input.trim();
     if (text.isEmpty) return [];
     if (!active) return _handleFreeText(text);
+    // A pasted bank SMS is always a new transaction, even mid-question:
+    // drop the open question (it will be asked again if still relevant).
+    if (text.length > 30 && SmsParser.parse(text) != null) {
+      _reset();
+      return _handleFreeText(text);
+    }
     if (text == cancelOption) {
+      // Don't re-ask about the same merchant on the very next paste.
+      if (flow == ChatFlow.merchant) {
+        store.snoozeMerchant(_merchant!.label, forHow: const Duration(days: 1));
+      }
       _reset();
       return [_bot('Cancelled. Paste a bank message or pick an option below.')];
+    }
+    if (flow == ChatFlow.merchant &&
+        (text == askLaterOption || text == neverAskOption)) {
+      final label = _merchant!.label;
+      if (text == askLaterOption) {
+        store.snoozeMerchant(label);
+      } else {
+        store.neverAskMerchant(label);
+      }
+      _reset();
+      return [
+        _bot(
+          text == askLaterOption
+              ? 'Sure, I\'ll ask about "$label" again in a week. 👍'
+              : 'Okay, I won\'t ask about "$label" again. You can still '
+                    'change categories from History.',
+        ),
+      ];
     }
     final error = _accept(text);
     if (error != null) return [_bot(error)];
@@ -212,6 +309,8 @@ class ChatEngine {
     _title = '';
     _due = null;
     _when = null;
+    _merchant = null;
+    _merchantIsPerson = false;
     _accountOptions.clear();
   }
 
@@ -232,7 +331,7 @@ class ChatEngine {
           ChatFlow.lend => 'How much did you lend to $_person?',
           ChatFlow.borrow => 'How much did you borrow from $_person?',
           ChatFlow.reminder => 'Amount involved? (tap Skip if none)',
-          ChatFlow.none => '',
+          ChatFlow.merchant || ChatFlow.none => '',
         };
       case _Step.txnDate:
         return switch (flow) {
@@ -266,6 +365,22 @@ class ChatEngine {
         return 'Any note? (optional)';
       case _Step.title:
         return 'What should I remind you about? ⏰';
+      case _Step.merchantKind:
+        final m = _merchant!;
+        final range = m.minAmount == m.maxAmount
+            ? '${money(m.minAmount)} each'
+            : '${money(m.minAmount)}–${money(m.maxAmount)} each';
+        return '🔎 I noticed you paid "${m.label}" ${m.count} times '
+            'in the last ${m.days} day${m.days == 1 ? '' : 's'} '
+            '($range, ${money(m.total)} in total), but I can\'t tell what '
+            'it is.\n\nIs it a friend, or a shop / stall? Tell me once and '
+            'I\'ll categorise these payments automatically from now on.';
+      case _Step.merchantName:
+        return _merchantIsPerson
+            ? 'What\'s their name? (so it shows instead of '
+                  '"${_merchant!.label}")'
+            : 'Want to give it a name? e.g. "Raju Tea Stall" '
+                  '(shows instead of "${_merchant!.label}")';
       case _Step.done:
         return '';
     }
@@ -359,6 +474,24 @@ class ChatEngine {
       case _Step.title:
         _title = text;
         return null;
+      case _Step.merchantKind:
+        if (text == personOption) {
+          _merchantIsPerson = true;
+          _category = friendsCategory;
+          return null;
+        }
+        for (final c in debitCategories) {
+          if (text == '${c.emoji} ${c.name}' ||
+              text.toLowerCase() == c.name.toLowerCase()) {
+            _category = c.name;
+            return null;
+          }
+        }
+        _category = text; // custom category
+        return null;
+      case _Step.merchantName:
+        _title = text == skipOption ? '' : text;
+        return null;
       case _Step.done:
         return null;
     }
@@ -367,6 +500,27 @@ class ChatEngine {
   List<ChatMessage> _finish() {
     final f = flow;
     final out = <ChatMessage>[];
+    if (f == ChatFlow.merchant) {
+      final m = _merchant!;
+      final category = _category ?? 'Others';
+      final changed = store.setMerchantCategory(
+        m.label,
+        category,
+        alias: _title.isEmpty ? null : _title,
+        isPerson: _merchantIsPerson,
+      );
+      final name = _title.isEmpty ? m.label : _title;
+      out.add(
+        _bot(
+          '✅ Got it! "$name" is ${emojiFor(category)} $category. '
+          'I updated $changed payment${changed == 1 ? '' : 's'}, and future '
+          'payments to it will be categorised automatically.',
+        ),
+      );
+      _reset();
+      out.addAll(_maybeAskAboutMerchant());
+      return out;
+    }
     if (f == ChatFlow.reminder) {
       final due = _due ?? DateTime.now().add(const Duration(days: 1));
       store.addReminder(
@@ -475,6 +629,7 @@ class ChatEngine {
         out.add(_bot(bits.join(' · ')));
       }
     }
+    if (added > 0) out.addAll(_maybeAskAboutMerchant());
     return out;
   }
 }
@@ -483,7 +638,7 @@ class ChatEngine {
 String describeTxn(AppStore store, Txn t) {
   final acc = store.accountById(t.accountId);
   final accLine = acc == null ? '' : '\n💳 ${acc.displayName}';
-  final who = t.counterparty;
+  final who = store.merchantLabel(t.counterparty);
   final when = '\n📅 ${formatTxnDate(t.date)}';
   return switch (t.type) {
     TxnType.debit =>

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../data/store.dart';
 import '../models/models.dart';
 import '../util/format.dart';
+import 'merchant_sheet.dart';
 import 'theme.dart';
 
 class AccountsScreen extends StatelessWidget {
@@ -19,7 +20,19 @@ class AccountsScreen extends StatelessWidget {
     final now = DateTime.now();
 
     return Scaffold(
-      appBar: royalAppBar('Banks & Cards'),
+      appBar: royalAppBar(
+        'Banks & Cards',
+        actions: [
+          TextButton.icon(
+            style: TextButton.styleFrom(foregroundColor: Royal.goldLight),
+            icon: const Icon(Icons.storefront_outlined),
+            label: const Text('Merchants'),
+            onPressed: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const MerchantsScreen())),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _editAccount(context, null),
         icon: const Icon(Icons.add),

@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../services/categories.dart';
 import '../util/format.dart';
 import 'export_action.dart';
+import 'merchant_sheet.dart';
 import 'profile_screen.dart';
 import 'theme.dart';
 
@@ -79,6 +80,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   totals: store.categoryTotals(_month, _breakdown),
                 ),
               ),
+              if (store.merchantsToReview().isNotEmpty)
+                _Section(
+                  title: 'Regular payments to review',
+                  child: _MerchantReview(store: store),
+                ),
               _Section(
                 title: 'Your banks & cards',
                 trailing: TextButton(
@@ -446,6 +452,45 @@ IconData _iconFor(AccountType t) => switch (t) {
   AccountType.wallet => Icons.account_balance_wallet,
   AccountType.cash => Icons.payments_outlined,
 };
+
+class _MerchantReview extends StatelessWidget {
+  final AppStore store;
+  const _MerchantReview({required this.store});
+
+  @override
+  Widget build(BuildContext context) {
+    final list = store.merchantsToReview();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'You pay these often, but I can\'t tell what they are. '
+          'Tell me once and I\'ll categorise them from now on.',
+        ),
+        const SizedBox(height: 8),
+        for (final m in list.take(5))
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const CircleAvatar(
+              backgroundColor: Royal.purple,
+              foregroundColor: Royal.goldLight,
+              child: Icon(Icons.storefront_outlined),
+            ),
+            title: Text(m.label, overflow: TextOverflow.ellipsis),
+            subtitle: Text(describeSuggestion(m)),
+            trailing: FilledButton.tonal(
+              onPressed: () => showMerchantSheet(
+                context,
+                counterparty: m.label,
+                summary: describeSuggestion(m),
+              ),
+              child: const Text('Tell me'),
+            ),
+          ),
+      ],
+    );
+  }
+}
 
 class _DebtsOverview extends StatelessWidget {
   final AppStore store;
