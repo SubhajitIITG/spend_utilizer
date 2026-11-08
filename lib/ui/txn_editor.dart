@@ -102,7 +102,7 @@ class _TxnEditorState extends State<_TxnEditor> {
     final store = context.watch<AppStore>();
     final t = widget.txn;
     final isDebt = _type == TxnType.lend || _type == TxnType.borrow;
-    final accountIds = store.accounts.map((a) => a.id).toSet();
+    final accountIds = store.selectableAccounts.map((a) => a.id).toSet();
 
     return Padding(
       padding: EdgeInsets.only(
@@ -167,7 +167,7 @@ class _TxnEditorState extends State<_TxnEditor> {
                   value: null,
                   child: Text('— None —'),
                 ),
-                for (final a in store.accounts)
+                for (final a in store.selectableAccounts)
                   DropdownMenuItem<String?>(
                     value: a.id,
                     child: Text(a.displayName),

@@ -180,7 +180,7 @@ class ExcelExporter {
       'Received (₹)',
       'Transactions',
     ]);
-    for (final a in store.accounts) {
+    for (final a in store.myAccounts) {
       final at = txns.where((t) => t.accountId == a.id).toList();
       acc.appendRow([
         _t(a.displayName),

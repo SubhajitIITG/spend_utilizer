@@ -185,6 +185,7 @@ class AppStore extends ChangeNotifier {
           final m = MerchantRule.fromJson(e as Map<String, dynamic>);
           merchants[m.key] = m;
         }
+        _migrate();
         final sync = j['sync'] as Map<String, dynamic>? ?? {};
         dirty.addAll((sync['dirty'] as List? ?? []).cast<String>());
         (sync['tombstones'] as Map<String, dynamic>? ?? {}).forEach((k, v) {
@@ -278,17 +279,32 @@ class AppStore extends ChangeNotifier {
     return null;
   }
 
+  /// The user's own accounts and cards (confirmed as theirs).
+  Iterable<Account> get myAccounts => accounts.where((a) => a.isMine);
+
+  /// Found in bank messages, waiting for "is this yours?".
+  List<Account> get pendingAccounts =>
+      accounts.where((a) => a.ownership == Ownership.pending).toList();
+
+  /// Accounts the user said belong to someone else (hidden from Accounts).
+  List<Account> get notMineAccounts =>
+      accounts.where((a) => a.ownership == Ownership.notMine).toList();
+
+  /// Accounts that can be picked when entering a payment.
+  Iterable<Account> get selectableAccounts =>
+      accounts.where((a) => a.ownership != Ownership.notMine);
+
   List<String> get banks {
     final set = <String>{};
-    for (final a in accounts) {
+    for (final a in myAccounts) {
       if (a.type != AccountType.cash) set.add(a.bank);
     }
     return set.toList()..sort();
   }
 
-  int get cardCount => accounts.where((a) => a.type.isCard).length;
+  int get cardCount => myAccounts.where((a) => a.type.isCard).length;
   int get bankAccountCount =>
-      accounts.where((a) => a.type == AccountType.savings).length;
+      myAccounts.where((a) => a.type == AccountType.savings).length;
 
   // -------------------------------------------------------------- accounts
 
@@ -311,7 +327,14 @@ class AppStore extends ChangeNotifier {
         }
       }
     }
-    final created = Account(id: newId(), bank: bank, type: type, last4: last4);
+    final created = Account(
+      id: newId(),
+      bank: bank,
+      type: type,
+      last4: last4,
+      // Found in a message: ask the user before treating it as theirs.
+      ownership: type == AccountType.cash ? Ownership.mine : Ownership.pending,
+    );
     accounts.add(created);
     _touchAccount(created);
     _changed();
@@ -324,6 +347,47 @@ class AppStore extends ChangeNotifier {
     }
     final (a, _) = findOrCreateAccount('Cash', AccountType.cash, '');
     return a;
+  }
+
+  /// Upgrades data saved by older versions of the app.
+  void _migrate() {
+    // Money sent out used to be filed as "Transfer"; it is now "Payees".
+    for (final t in txns) {
+      if (t.type == TxnType.debit && t.category == 'Transfer') {
+        t.category = payeesCategory;
+      }
+    }
+    for (final m in merchants.values) {
+      if (m.category == 'Transfer') m.category = payeesCategory;
+    }
+    // Cash is always the user's own.
+    for (final a in accounts) {
+      if (a.type == AccountType.cash) a.ownership = Ownership.mine;
+    }
+  }
+
+  /// The user confirmed whether [a] is theirs. Someone else's account is
+  /// kept (so we remember the answer) but its payments are detached from
+  /// it and the account becomes the payee.
+  void setOwnership(Account a, Ownership ownership) {
+    a.ownership = ownership;
+    _touchAccount(a);
+    if (ownership == Ownership.notMine) {
+      for (final t in txns) {
+        if (t.accountId != a.id) continue;
+        t.accountId = null;
+        if (t.counterparty.trim().isEmpty) {
+          t.counterparty = 'A/c ••${a.last4}';
+        }
+        if (t.type == TxnType.debit &&
+            !t.userCategorized &&
+            unclearCategories.contains(t.category)) {
+          t.category = payeesCategory;
+        }
+        _touchTxn(t);
+      }
+    }
+    _changed();
   }
 
   void addAccount(Account a) {
@@ -390,11 +454,9 @@ class AppStore extends ChangeNotifier {
     final p = SmsParser.parse(raw);
     if (p == null) return const SmsResult(SmsStatus.notTransaction);
     if (_isDuplicate(p, raw)) return const SmsResult(SmsStatus.duplicate);
-    final (account, isNew) = findOrCreateAccount(
-      p.bank,
-      p.accountType,
-      p.last4,
-    );
+    final (found, isNew) = findOrCreateAccount(p.bank, p.accountType, p.last4);
+    // The user said this account isn't theirs: don't attach payments to it.
+    final account = found.ownership == Ownership.notMine ? null : found;
     // A category the user taught us for this merchant beats the guess.
     final rule = merchants[merchantKey(p.counterparty)];
     final category = p.type == TxnType.debit && (rule?.decided ?? false)
@@ -405,8 +467,10 @@ class AppStore extends ChangeNotifier {
       type: p.type,
       amount: p.amount,
       category: category,
-      accountId: account.id,
-      counterparty: p.counterparty,
+      accountId: account?.id,
+      counterparty: p.counterparty.isEmpty && account == null
+          ? 'A/c ••${found.last4}'
+          : p.counterparty,
       date: p.date,
       source: 'sms',
       rawMessage: raw.trim(),
@@ -418,7 +482,7 @@ class AppStore extends ChangeNotifier {
     return SmsResult(
       SmsStatus.added,
       txn: t,
-      account: account,
+      account: found,
       newAccount: isNew,
       dateFound: p.dateFound,
     );

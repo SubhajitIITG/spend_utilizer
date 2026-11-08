@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spend_utilizer/data/store.dart';
+import 'package:spend_utilizer/models/models.dart';
 import 'package:spend_utilizer/services/chat_engine.dart';
 import 'package:spend_utilizer/services/sync_service.dart';
 
@@ -18,6 +19,11 @@ String stall(int amount, int daysAgo, {String vpa = 'raju.k1987@okaxis'}) {
 Future<AppStore> newStore() async {
   final s = AppStore(storage: MemoryStorage());
   await s.load();
+  // The account these payments come from is already confirmed as the
+  // user's, so the bot only asks about merchants.
+  s.addAccount(
+    Account(id: 'sbi', bank: 'SBI', type: AccountType.savings, last4: '4567'),
+  );
   return s;
 }
 

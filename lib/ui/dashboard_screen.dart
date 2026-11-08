@@ -395,14 +395,14 @@ class _AccountsOverview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (store.accounts.isEmpty) {
+    if (store.myAccounts.isEmpty) {
       return const Text(
         'Accounts and cards are detected automatically from '
         'your bank messages.',
       );
     }
     final byBank = <String, List<Account>>{};
-    for (final a in store.accounts) {
+    for (final a in store.myAccounts) {
       byBank.putIfAbsent(a.bank, () => []).add(a);
     }
     return Column(

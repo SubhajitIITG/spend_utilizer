@@ -211,6 +211,67 @@ void main() {
     expect(r.date, DateTime(2026, 11, 7, 21, 4, 5));
   });
 
+  test('own account vs payee account in the same message', () {
+    final r = p(
+      'Rs.5,000.00 transferred from your A/c XX1234 to A/c XX5678 '
+      'on 05-11-26 via IMPS. Ref 612345678901 -SBI',
+    );
+    expect(r.type, TxnType.debit);
+    expect(r.last4, '1234');
+    expect(r.otherLast4, '5678');
+    expect(r.counterparty, 'A/c ••5678');
+    expect(r.category, 'Payees');
+
+    // Payee number written first.
+    final r2 = p(
+      'IMPS of INR 2,000 to Beneficiary A/c XX9999 debited from '
+      'A/c XX1234 on 05-11-26. -HDFC',
+    );
+    expect(r2.last4, '1234');
+    expect(r2.otherLast4, '9999');
+
+    // Credit: the sender's account is not ours.
+    final r3 = p(
+      'Your A/c XX4321 is credited with Rs.750 on 05-11-26 by '
+      'A/c XX8888 (IMPS Ref 612300001111). -Axis',
+    );
+    expect(r3.type, TxnType.credit);
+    expect(r3.last4, '4321');
+    expect(r3.otherLast4, '8888');
+  });
+
+  test('money sent to people is categorised as Payees', () {
+    expect(
+      p(
+        'Sent Rs.100.00 From HDFC Bank A/C *9876 To RAJU KUMAR On 06/11/26 '
+        'Ref 612398765432',
+      ).category,
+      'Payees',
+    );
+    expect(
+      p(
+        'Rs.300 debited from A/c XX1234 on 05-11-26 to VPA 9876543210@ybl '
+        '(UPI Ref No 512345678111) -SBI',
+      ).category,
+      'Payees',
+    );
+    expect(
+      p(
+        'Rs.1,000 debited from A/c XX1234 on 05-11-26 NEFT to SHREE TRADERS '
+        'Ref 512345678222 -SBI',
+      ).category,
+      'Payees', // NEFT to a business is still a bank transfer
+    );
+    // A shop name stays a shop.
+    expect(
+      p(
+        'Rs.200 debited from A/c XX1234 on 05-11-26 to SHREE SAI '
+        'ENTERPRISES UPI Ref 512345678333 -SBI',
+      ).category,
+      'Others',
+    );
+  });
+
   test('splitMessages splits on blank lines', () {
     final parts = SmsParser.splitMessages('msg one\nline2\n\n  \nmsg two');
     expect(parts, ['msg one\nline2', 'msg two']);

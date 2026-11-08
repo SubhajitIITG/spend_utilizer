@@ -32,6 +32,12 @@ void main() {
       expect(s.addFromSms(m).status, SmsStatus.added);
     }
     expect(s.accounts.length, 4);
+    // New accounts wait for "is this yours?" before they count.
+    expect(s.pendingAccounts.length, 4);
+    expect(s.banks, isEmpty);
+    for (final a in s.pendingAccounts) {
+      s.setOwnership(a, Ownership.mine);
+    }
     expect(s.banks, ['HDFC', 'SBI']);
     expect(s.cardCount, 3);
     expect(s.bankAccountCount, 1);
@@ -154,16 +160,17 @@ void main() {
     final e = ChatEngine(s);
     final replies = e.handle('$hdfcCard1\n\n$hdfcCard2\n\nhello');
     expect(s.txns.length, 2);
-    expect(replies.last.text, contains('2 added'));
-    expect(replies.last.text, contains('1 not understood'));
+    final summary = replies.firstWhere((r) => r.text.contains('added'));
+    expect(summary.text, contains('2 added'));
+    expect(summary.text, contains('1 not understood'));
   });
 
   test('SMS without a date says today was used', () async {
     final s = await newStore();
     final e = ChatEngine(s);
     final r = e.handle('Rs 75 debited from A/c XX1234 to VPA chai@ybl');
-    expect(r.single.text, contains('No date in the message'));
-    expect(r.single.text, contains('📅'));
+    expect(r.first.text, contains('No date in the message'));
+    expect(r.first.text, contains('📅'));
   });
 
   test('typed dates are understood', () {
@@ -199,5 +206,73 @@ void main() {
     final rows = x.tables['Transactions']!.rows;
     expect(rows.first.first!.value.toString(), 'Date');
     expect(rows.length, greaterThanOrEqualTo(3));
+  });
+
+  test('bot asks whether a new account is yours', () async {
+    final s = await newStore();
+    final e = ChatEngine(s);
+    final r = e.handle(hdfcCard1);
+    expect(r.length, 2);
+    expect(r.last.text, contains('HDFC Credit Card ••1111'));
+    expect(e.flow, ChatFlow.ownership);
+    expect(e.options, containsAll([mineOption, notMineOption]));
+    final ok = e.handle(mineOption);
+    expect(ok.first.text, contains('Added'));
+    expect(s.accounts.single.isMine, isTrue);
+    expect(s.cardCount, 1);
+    // Same card again: no new question.
+    expect(e.handle(hdfcCard1.replaceAll('SWIGGY', 'ZOMATO')).length, 1);
+  });
+
+  test('"not mine" turns the account into a payee', () async {
+    final s = await newStore();
+    final e = ChatEngine(s);
+    e.handle(
+      'Rs.5,000.00 transferred from A/c XX7777 on 05-11-26 via IMPS '
+      'Ref 612345678901 -SBI',
+    );
+    expect(e.flow, ChatFlow.ownership);
+    e.handle(notMineOption);
+    final acc = s.accounts.single;
+    expect(acc.ownership, Ownership.notMine);
+    expect(s.myAccounts, isEmpty);
+    expect(s.banks, isEmpty);
+    final t = s.txns.single;
+    expect(t.accountId, isNull);
+    expect(t.counterparty, 'A/c ••7777');
+    expect(t.category, 'Payees');
+    // Later messages about that account aren't attached to it either.
+    e.handle(
+      'Rs.100.00 transferred from A/c XX7777 on 06-11-26 via IMPS '
+      'Ref 612345678902 -SBI',
+    );
+    expect(s.txns.last.accountId, isNull);
+    expect(e.active, isFalse);
+  });
+
+  test('ownership question resumes after a restart', () async {
+    final s = await newStore();
+    final e = ChatEngine(s);
+    for (final m in e.handle(hdfcCard1)) {
+      s.addChat(m);
+    }
+    final fresh = ChatEngine(s)..resumePendingQuestion();
+    expect(fresh.flow, ChatFlow.ownership);
+    fresh.handle('yes');
+    expect(s.accounts.single.isMine, isTrue);
+  });
+
+  test('old data: debit "Transfer" becomes "Payees", cash is mine', () async {
+    final old = MemoryStorage(
+      '{"accounts":[{"id":"c","bank":"Cash","type":"cash","last4":""},'
+      '{"id":"h","bank":"HDFC","type":"creditCard","last4":"1111"}],'
+      '"txns":[{"id":"t","type":"debit","amount":5,"category":"Transfer",'
+      '"date":"2026-11-01T12:00:00.000"}]}',
+    );
+    final s = AppStore(storage: old);
+    await s.load();
+    expect(s.txns.single.category, 'Payees');
+    expect(s.accountById('c')!.isMine, isTrue);
+    expect(s.accountById('h')!.ownership, Ownership.pending);
   });
 }

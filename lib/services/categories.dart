@@ -25,7 +25,7 @@ const debitCategories = <Category>[
   Category('Personal Care', '💇'),
   Category('Gifts & Donations', '🎁'),
   Category(friendsCategory, '👥'),
-  Category('Transfer', '🔁'),
+  Category(payeesCategory, '💸'),
   Category('Others', '📦'),
 ];
 
@@ -44,9 +44,12 @@ const creditCategories = <Category>[
 /// Regular payments to a person (not a shop), e.g. splitting chai daily.
 const friendsCategory = 'Friends & Family';
 
+/// Money sent to people by bank transfer / UPI (not to shops).
+const payeesCategory = 'Payees';
+
 /// Categories that mean "we couldn't tell": payments in these are worth
 /// asking the user about.
-const unclearCategories = {'Others', 'Transfer'};
+const unclearCategories = {'Others', 'Transfer', payeesCategory};
 
 const lendCategory = 'Lent';
 const borrowCategory = 'Borrowed';

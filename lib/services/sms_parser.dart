@@ -15,6 +15,10 @@ class ParsedSms {
   final String bank;
   final AccountType accountType;
   final String last4;
+
+  /// Last digits of the *other* party's account (payee for a debit, payer
+  /// for a credit), when the message shows one. Never the user's own.
+  final String otherLast4;
   final String counterparty;
   final String refNo;
   final DateTime date;
@@ -30,6 +34,7 @@ class ParsedSms {
     required this.bank,
     required this.accountType,
     required this.last4,
+    this.otherLast4 = '',
     required this.counterparty,
     required this.refNo,
     required this.date,
@@ -79,18 +84,29 @@ class SmsParser {
         .hasMatch(lower);
     final bank = _bank(lower);
     final accountType = _accountType(lower);
-    final last4 = _last4(text);
-    final counterparty = _counterparty(text);
+    final (last4, otherLast4) = _accountDigits(text, type);
+    var counterparty = _counterparty(text);
+    // Paid to (or received from) a bank account with no name given.
+    if (counterparty.isEmpty && otherLast4.isNotEmpty) {
+      counterparty = 'A/c ••$otherLast4';
+    }
     final refNo = _refNo(text);
     final (date, dateFound) = _date(text, now);
 
-    final category = isRefund
+    var category = isRefund
         ? 'Refund'
         : guessCategory(
             isCredit: type == TxnType.credit,
             merchant: counterparty,
             message: text,
           );
+    // Money sent to a person by bank transfer → Payees.
+    if (type == TxnType.debit &&
+        !isRefund &&
+        (category == 'Others' || category == 'Transfer') &&
+        _isPersonTransfer(lower, counterparty, otherLast4)) {
+      category = payeesCategory;
+    }
 
     return ParsedSms(
       type: isRefund ? TxnType.credit : type,
@@ -98,6 +114,7 @@ class SmsParser {
       bank: bank,
       accountType: accountType,
       last4: last4,
+      otherLast4: otherLast4,
       counterparty: counterparty,
       refNo: refNo,
       date: date,
@@ -257,24 +274,80 @@ class SmsParser {
 
   // ----------------------------------------------------------------- last4
 
-  static String _last4(String text) {
-    // Masked numbers: XX1234, x4321, *1234, XXXXXXXX5678, ••1234
-    final masked = RegExp(r'(?<![a-wyzA-WYZ])[xX*•]+\s?(\d{3,6})\b')
-        .firstMatch(text);
-    if (masked != null) return _tail(masked.group(1)!);
+  /// Returns (the user's own account/card digits, the other party's
+  /// account digits). Messages like "from your A/c XX1234 to A/c XX5678"
+  /// mention both; the words just before each number tell them apart.
+  static (String, String) _accountDigits(String text, TxnType type) {
+    String own = '', other = '';
+    final masked = RegExp(r'(?<![a-wyzA-WYZ])[xX*•]+\s?(\d{3,6})\b');
+    for (final m in masked.allMatches(text)) {
+      final digits = _tail(m.group(1)!);
+      if (_isOtherParty(text, m.start, type)) {
+        if (other.isEmpty) other = digits;
+      } else if (own.isEmpty) {
+        own = digits;
+      }
+    }
+    if (own.isNotEmpty || other.isNotEmpty) return (own, other);
 
     final ending = RegExp(
       r'ending\s*(?:with|in)?\s*(\d{3,6})\b',
       caseSensitive: false,
     ).firstMatch(text);
-    if (ending != null) return _tail(ending.group(1)!);
+    if (ending != null) return (_tail(ending.group(1)!), '');
 
     final near = RegExp(
       r'\b(?:a/?c|acct|account|card)\b\s*(?:no\.?|number)?\s*[:#]?\s*(\d{3,6})\b',
       caseSensitive: false,
     ).firstMatch(text);
-    if (near != null) return _tail(near.group(1)!);
-    return '';
+    if (near != null) {
+      final digits = _tail(near.group(1)!);
+      return _isOtherParty(text, near.start, type)
+          ? ('', digits)
+          : (digits, '');
+    }
+    return ('', '');
+  }
+
+  /// Whether the account number starting at [at] belongs to the other
+  /// party, judged by the few words right before it.
+  static bool _isOtherParty(String text, int at, TxnType type) {
+    final before = text.substring(at - 40 < 0 ? 0 : at - 40, at).toLowerCase();
+    // Up to 3 short words between the keyword and the number, e.g.
+    // "to HDFC Bank A/c XX5678".
+    bool near(String words) =>
+        RegExp('\\b($words)\\b[\\s:.-]*(?:[a-z/.]+[\\s:.-]*){0,3}\$')
+            .hasMatch(before);
+    if (near('your|ur|yr|my')) return false;
+    if (near('beneficiary|benef|bene|payee|recipient')) return true;
+    if (type == TxnType.credit) return near('from|by|sender|remitter');
+    return near('to');
+  }
+
+  /// Money sent to a person (not a shop): bank transfers, payments to an
+  /// account number or a phone-number UPI ID, or to a person's name.
+  static bool _isPersonTransfer(
+    String lower,
+    String counterparty,
+    String otherLast4,
+  ) {
+    if (otherLast4.isNotEmpty) return true;
+    if (RegExp(
+      r'\b(neft|imps|rtgs|beneficiary|fund transfer|trf to|'
+      r'transfer(?:red)? to)\b',
+    ).hasMatch(lower)) {
+      return true;
+    }
+    if (RegExp(r'^\+?\d{10,12}@').hasMatch(counterparty)) return true;
+    final looksLikeName = RegExp(r'^[A-Za-z]+(?: [A-Za-z.]+){1,3}$')
+        .hasMatch(counterparty);
+    final businessWord = RegExp(
+      r'\b(enterprises?|traders?|stores?|mart|services?|pvt|ltd|llp|'
+      r'hotel|medicals?|agency|agencies|company|co|shop|centre|center|'
+      r'restaurant|cafe|foods?|solutions|industries|bazaar)\b',
+      caseSensitive: false,
+    ).hasMatch(counterparty);
+    return looksLikeName && !businessWord;
   }
 
   static String _tail(String digits) =>

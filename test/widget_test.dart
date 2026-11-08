@@ -22,7 +22,13 @@ void main() {
 
     expect(store.txns.length, 1);
     expect(find.textContaining('Spent ₹1,250.50 at BIGBASKET'), findsOneWidget);
-    expect(find.textContaining('New credit card found'), findsOneWidget);
+    expect(
+      find.textContaining('Is this your own credit card?'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('✅ Yes, it\'s mine'));
+    await tester.pumpAndSettle();
+    expect(store.accounts.single.isMine, isTrue);
 
     // Start a manual debit flow from the quick actions.
     await tester.tap(find.text('Debit'));

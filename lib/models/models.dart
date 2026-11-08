@@ -7,6 +7,10 @@ enum TxnType { debit, credit, lend, borrow }
 
 enum AccountType { savings, creditCard, debitCard, wallet, cash }
 
+/// Whether an account/card belongs to the user. Accounts found in bank
+/// messages start as [pending] until the user confirms.
+enum Ownership { pending, mine, notMine }
+
 extension TxnTypeX on TxnType {
   String get label => switch (this) {
     TxnType.debit => 'Debit',
@@ -55,8 +59,12 @@ class Account {
   /// User-editable display name, e.g. "HDFC Millennia". Empty = auto name.
   String nickname;
 
+  Ownership ownership;
+
   /// Last local change (UTC). Used to merge edits from several devices.
   DateTime updatedAt;
+
+  bool get isMine => ownership == Ownership.mine;
 
   Account({
     required this.id,
@@ -64,6 +72,7 @@ class Account {
     required this.type,
     required this.last4,
     this.nickname = '',
+    this.ownership = Ownership.mine,
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now().toUtc();
 
@@ -84,6 +93,7 @@ class Account {
     'type': type.name,
     'last4': last4,
     'nickname': nickname,
+    'ownership': ownership.name,
     'updatedAt': updatedAt.toIso8601String(),
   };
 
@@ -93,6 +103,8 @@ class Account {
     type: _enumByName(AccountType.values, j['type'], AccountType.savings),
     last4: j['last4'] as String? ?? '',
     nickname: j['nickname'] as String? ?? '',
+    // Accounts saved before this field existed were never confirmed.
+    ownership: _enumByName(Ownership.values, j['ownership'], Ownership.pending),
     updatedAt: _parseUpdated(j['updatedAt']),
   );
 }

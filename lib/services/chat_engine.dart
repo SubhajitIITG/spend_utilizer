@@ -22,6 +22,9 @@ enum ChatFlow {
 
   /// Bot-initiated: "you pay X regularly, what is it?"
   merchant,
+
+  /// Bot-initiated: "is this account / card yours?"
+  ownership,
 }
 
 enum InputKind { text, amount, date }
@@ -35,6 +38,7 @@ extension ChatFlowX on ChatFlow {
     ChatFlow.borrow => 'Borrow',
     ChatFlow.reminder => 'Reminder',
     ChatFlow.merchant => 'Regular payment',
+    ChatFlow.ownership => 'Account check',
   };
   String get emoji => switch (this) {
     ChatFlow.none => '📋',
@@ -44,6 +48,7 @@ extension ChatFlowX on ChatFlow {
     ChatFlow.borrow => '🙏',
     ChatFlow.reminder => '⏰',
     ChatFlow.merchant => '🔎',
+    ChatFlow.ownership => '🏦',
   };
 }
 
@@ -67,6 +72,8 @@ const cashOption = 'Cash';
 const personOption = '👤 A friend / person';
 const askLaterOption = 'Ask me later';
 const neverAskOption = 'Don\'t ask again';
+const mineOption = '✅ Yes, it\'s mine';
+const notMineOption = '❌ No, someone else\'s';
 
 class ChatEngine {
   final AppStore store;
@@ -86,6 +93,7 @@ class ChatEngine {
   DateTime? _due;
   DateTime? _when;
   MerchantSuggestion? _merchant;
+  Account? _pendingAccount;
   bool _merchantIsPerson = false;
 
   /// Maps the account option labels shown to the user to account ids.
@@ -105,6 +113,7 @@ class ChatEngine {
 
   String get inputHint {
     if (!active) return 'Paste bank message(s) here…';
+    if (flow == ChatFlow.ownership) return 'Tap Yes or No below';
     return switch (_step) {
       _Step.amount => 'Enter amount, e.g. 450',
       _Step.category => 'Pick a category or type one',
@@ -123,6 +132,9 @@ class ChatEngine {
   /// Quick-reply chips for the current step.
   List<String> get options {
     if (!active) return const [];
+    if (flow == ChatFlow.ownership) {
+      return const [mineOption, notMineOption, cancelOption];
+    }
     final List<String> opts = switch (_step) {
       _Step.category =>
         (flow == ChatFlow.credit ? creditCategories : debitCategories)
@@ -205,6 +217,7 @@ class ChatEngine {
       ],
       ChatFlow.reminder => [_Step.title, _Step.amount, _Step.dueDate],
       ChatFlow.merchant => [_Step.merchantKind, _Step.merchantName],
+      ChatFlow.ownership => [],
       ChatFlow.none => [],
     };
     if (_steps.isEmpty) return [];
@@ -229,7 +242,18 @@ class ChatEngine {
   void resumePendingQuestion() {
     if (active || store.chat.isEmpty) return;
     final last = store.chat.last;
-    if (last.fromUser || !last.text.startsWith('🔎')) return;
+    if (last.fromUser) return;
+    if (last.text.startsWith('🏦')) {
+      for (final a in store.pendingAccounts) {
+        if (last.text.contains(a.displayName)) {
+          flow = ChatFlow.ownership;
+          _pendingAccount = a;
+          return;
+        }
+      }
+      return;
+    }
+    if (!last.text.startsWith('🔎')) return;
     for (final m in store.merchantsToReview()) {
       if (last.text.contains('"${m.label}"')) {
         flow = ChatFlow.merchant;
@@ -241,9 +265,28 @@ class ChatEngine {
     }
   }
 
-  /// If a regular, uncategorised merchant exists, starts asking about it.
-  List<ChatMessage> _maybeAskAboutMerchant() {
+  /// Asks whether a newly found account/card belongs to the user.
+  List<ChatMessage> reviewAccount(Account a) {
+    _reset();
+    flow = ChatFlow.ownership;
+    _pendingAccount = a;
+    final what = a.type.label.toLowerCase();
+    return [
+      _bot(
+        '🏦 This message mentions a $what I haven\'t seen before: '
+        '${a.displayName}.\n\nIs this your own $what? I keep only your '
+        'accounts and cards in Accounts. If it belongs to someone else, I\'ll '
+        'treat it as a payee (it stays in History).',
+      ),
+    ];
+  }
+
+  /// Asks the next open question, if any: first unconfirmed accounts,
+  /// then regularly-paid merchants we can't categorise.
+  List<ChatMessage> _maybeAskNext() {
     if (active) return const [];
+    final pending = store.pendingAccounts;
+    if (pending.isNotEmpty) return reviewAccount(pending.first);
     final list = store.merchantsToReview();
     return list.isEmpty ? const [] : reviewMerchant(list.first);
   }
@@ -266,6 +309,31 @@ class ChatEngine {
       }
       _reset();
       return [_bot('Cancelled. Paste a bank message or pick an option below.')];
+    }
+    if (flow == ChatFlow.ownership) {
+      final a = _pendingAccount!;
+      final yes =
+          text == mineOption ||
+          RegExp(r'^(y|yes|mine)\b', caseSensitive: false).hasMatch(text);
+      final no =
+          text == notMineOption ||
+          RegExp(r'^(n|no|not)\b', caseSensitive: false).hasMatch(text);
+      if (yes == no) {
+        return [_bot('Please tap "Yes, it\'s mine" or "No, someone else\'s".')];
+      }
+      store.setOwnership(a, yes ? Ownership.mine : Ownership.notMine);
+      _reset();
+      return [
+        _bot(
+          yes
+              ? '👍 Added ${a.displayName} to your accounts. You can rename '
+                    'it in Accounts.'
+              : '👌 Got it, A/c ••${a.last4} isn\'t yours. Payments to it '
+                    'stay in History under Payees, but it won\'t appear in '
+                    'your accounts.',
+        ),
+        ..._maybeAskNext(),
+      ];
     }
     if (flow == ChatFlow.merchant &&
         (text == askLaterOption || text == neverAskOption)) {
@@ -310,6 +378,7 @@ class ChatEngine {
     _due = null;
     _when = null;
     _merchant = null;
+    _pendingAccount = null;
     _merchantIsPerson = false;
     _accountOptions.clear();
   }
@@ -331,7 +400,7 @@ class ChatEngine {
           ChatFlow.lend => 'How much did you lend to $_person?',
           ChatFlow.borrow => 'How much did you borrow from $_person?',
           ChatFlow.reminder => 'Amount involved? (tap Skip if none)',
-          ChatFlow.merchant || ChatFlow.none => '',
+          ChatFlow.merchant || ChatFlow.ownership || ChatFlow.none => '',
         };
       case _Step.txnDate:
         return switch (flow) {
@@ -388,7 +457,7 @@ class ChatEngine {
 
   void _buildAccountOptions() {
     _accountOptions.clear();
-    for (final a in store.accounts) {
+    for (final a in store.selectableAccounts) {
       if (a.type == AccountType.cash) continue;
       _accountOptions[a.displayName] = a.id;
     }
@@ -518,7 +587,7 @@ class ChatEngine {
         ),
       );
       _reset();
-      out.addAll(_maybeAskAboutMerchant());
+      out.addAll(_maybeAskNext());
       return out;
     }
     if (f == ChatFlow.reminder) {
@@ -598,11 +667,6 @@ class ChatEngine {
                 '\n📅 No date in the message, so I used today. Tap '
                 'Date to change it.';
           }
-          if (r.newAccount) {
-            msg +=
-                '\n🆕 New ${r.account!.type.label.toLowerCase()} found: '
-                '${r.account!.displayName}. You can rename it in Accounts.';
-          }
           out.add(_bot(msg, txnId: r.txn!.id));
         case SmsStatus.duplicate:
           dup++;
@@ -629,7 +693,7 @@ class ChatEngine {
         out.add(_bot(bits.join(' · ')));
       }
     }
-    if (added > 0) out.addAll(_maybeAskAboutMerchant());
+    if (added > 0) out.addAll(_maybeAskNext());
     return out;
   }
 }

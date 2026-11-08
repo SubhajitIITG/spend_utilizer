@@ -17,6 +17,9 @@ class TransactionsScreen extends StatefulWidget {
 
 class _TransactionsScreenState extends State<TransactionsScreen> {
   TxnType? _filter;
+
+  /// "Payees" chip: money sent to people (bank transfers, friends).
+  bool _payees = false;
   String _query = '';
 
   @override
@@ -25,6 +28,12 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     final q = _query.toLowerCase();
     final list = store.txns.where((t) {
       if (_filter != null && t.type != _filter) return false;
+      if (_payees &&
+          !(t.type == TxnType.debit &&
+              (t.category == payeesCategory ||
+                  t.category == friendsCategory))) {
+        return false;
+      }
       if (q.isEmpty) return true;
       final acc = store.accountById(t.accountId)?.displayName ?? '';
       return t.counterparty.toLowerCase().contains(q) ||
@@ -83,10 +92,22 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                         padding: const EdgeInsets.only(right: 6),
                         child: ChoiceChip(
                           label: Text(f == null ? 'All' : f.label),
-                          selected: _filter == f,
-                          onSelected: (_) => setState(() => _filter = f),
+                          selected: !_payees && _filter == f,
+                          onSelected: (_) => setState(() {
+                            _filter = f;
+                            _payees = false;
+                          }),
                         ),
                       ),
+                    ChoiceChip(
+                      avatar: const Text('💸'),
+                      label: const Text('Payees'),
+                      selected: _payees,
+                      onSelected: (_) => setState(() {
+                        _payees = true;
+                        _filter = null;
+                      }),
+                    ),
                   ],
                 ),
               ),

@@ -14,9 +14,12 @@ class AccountsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final byBank = <String, List<Account>>{};
-    for (final a in store.accounts) {
+    // Only the user's own accounts are listed; others are payees.
+    for (final a in store.myAccounts) {
       byBank.putIfAbsent(a.bank, () => []).add(a);
     }
+    final pending = store.pendingAccounts;
+    final notMine = store.notMineAccounts;
     final now = DateTime.now();
 
     return Scaffold(
@@ -38,7 +41,7 @@ class AccountsScreen extends StatelessWidget {
         icon: const Icon(Icons.add),
         label: const Text('Add account'),
       ),
-      body: store.accounts.isEmpty
+      body: byBank.isEmpty && pending.isEmpty && notMine.isEmpty
           ? const Center(
               child: Padding(
                 padding: EdgeInsets.all(24),
@@ -55,6 +58,7 @@ class AccountsScreen extends StatelessWidget {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
                   children: [
+                    if (pending.isNotEmpty) _ConfirmCard(accounts: pending),
                     for (final e in byBank.entries)
                       Card(
                         margin: const EdgeInsets.only(bottom: 14),
@@ -111,6 +115,7 @@ class AccountsScreen extends StatelessWidget {
                           ],
                         ),
                       ),
+                    if (notMine.isNotEmpty) _NotMineCard(accounts: notMine),
                   ],
                 ),
               ),
@@ -262,3 +267,88 @@ IconData _iconFor(AccountType t) => switch (t) {
   AccountType.wallet => Icons.account_balance_wallet,
   AccountType.cash => Icons.payments_outlined,
 };
+
+/// "Is this yours?" for accounts/cards found in bank messages.
+class _ConfirmCard extends StatelessWidget {
+  final List<Account> accounts;
+  const _ConfirmCard({required this.accounts});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.read<AppStore>();
+    final t = Theme.of(context).textTheme;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 14),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Is this yours?', style: t.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'Found in your bank messages. Only your own accounts and '
+              'cards are kept here; someone else\'s is treated as a payee.',
+              style: t.bodySmall,
+            ),
+            for (final a in accounts) ...[
+              const Divider(height: 24),
+              Row(
+                children: [
+                  Icon(_iconFor(a.type), color: Royal.gold),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(a.displayName, style: t.bodyLarge)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  FilledButton.tonal(
+                    onPressed: () => store.setOwnership(a, Ownership.mine),
+                    child: const Text('Yes, it\'s mine'),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => store.setOwnership(a, Ownership.notMine),
+                    child: const Text('No, someone else\'s'),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Accounts the user said aren't theirs, in case they tapped by mistake.
+class _NotMineCard extends StatelessWidget {
+  final List<Account> accounts;
+  const _NotMineCard({required this.accounts});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.read<AppStore>();
+    return Card(
+      margin: const EdgeInsets.only(bottom: 14),
+      child: ExpansionTile(
+        shape: const Border(),
+        title: Text('Not your accounts (${accounts.length})'),
+        subtitle: const Text('Treated as payees. Tap to review.'),
+        children: [
+          for (final a in accounts)
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: Text('${a.bank} A/c ••${a.last4}'),
+              trailing: TextButton(
+                onPressed: () => store.setOwnership(a, Ownership.mine),
+                child: const Text('Actually mine'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
