@@ -6,7 +6,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config.dart';
 
 /// Thin wrapper around Supabase Auth with the three sign-in options:
-/// email code, phone (SMS) code, and guest (anonymous).
+/// email + password, phone (SMS) code, and guest (anonymous).
+///
+/// Email uses a password rather than an emailed code: on Supabase's free
+/// plan the email template can't be edited to include a code without
+/// setting up a custom SMTP server.
 class AuthService extends ChangeNotifier {
   final GoTrueClient _auth;
   StreamSubscription<AuthState>? _sub;
@@ -46,14 +50,20 @@ class AuthService extends ChangeNotifier {
 
   // ---- Sign in
 
-  Future<void> sendEmailCode(String email) =>
-      _auth.signInWithOtp(email: email.trim(), shouldCreateUser: true);
+  /// Thrown when the Supabase project still asks new users to confirm their
+  /// email (turn off "Confirm email" in the Email provider settings).
+  static const confirmEmailRequired = 'confirm-email-required';
 
-  Future<void> verifyEmailCode(String email, String code) => _auth.verifyOTP(
-    email: email.trim(),
-    token: code.trim(),
-    type: OtpType.email,
-  );
+  Future<void> signInWithPassword(String email, String password) =>
+      _auth.signInWithPassword(email: email.trim(), password: password);
+
+  Future<void> signUpWithPassword(String email, String password) async {
+    final res = await _auth.signUp(email: email.trim(), password: password);
+    // No session means the project requires email confirmation first.
+    if (res.session == null) {
+      throw const AuthException(confirmEmailRequired);
+    }
+  }
 
   Future<void> sendPhoneCode(String phone) =>
       _auth.signInWithOtp(phone: normalizePhone(phone));
@@ -68,14 +78,18 @@ class AuthService extends ChangeNotifier {
 
   // ---- Upgrade a guest to a permanent account (keeps the same data)
 
-  Future<void> linkEmail(String email) =>
-      _auth.updateUser(UserAttributes(email: email.trim()));
-
-  Future<void> verifyLinkEmail(String email, String code) => _auth.verifyOTP(
-    email: email.trim(),
-    token: code.trim(),
-    type: OtpType.emailChange,
-  );
+  /// Gives a guest account an email + password so it can be used on other
+  /// devices. The data stays because it's the same account.
+  Future<void> linkEmailPassword(String email, String password) async {
+    final res = await _auth.updateUser(
+      UserAttributes(email: email.trim(), password: password),
+    );
+    // If the project requires confirming email changes, the email isn't
+    // attached yet.
+    if ((res.user?.email ?? '').toLowerCase() != email.trim().toLowerCase()) {
+      throw const AuthException(confirmEmailRequired);
+    }
+  }
 
   Future<void> linkPhone(String phone) =>
       _auth.updateUser(UserAttributes(phone: normalizePhone(phone)));
@@ -107,6 +121,21 @@ class AuthService extends ChangeNotifier {
         return 'Phone login isn\'t set up on the server yet. '
             'Use email or guest for now.';
       }
+      if (m.contains('invalid login credentials')) {
+        return 'Wrong email or password.';
+      }
+      if (m.contains('already registered') ||
+          m.contains('already been registered') ||
+          m.contains('already exists')) {
+        return 'This email already has an account. Tap "Already have an '
+            'account? Sign in" below.';
+      }
+      if (m == confirmEmailRequired || m.contains('email not confirmed')) {
+        return 'The server is asking for email confirmation. In Supabase, '
+            'open Authentication → Sign In / Providers → Email, turn OFF '
+            '"Confirm email", save, and try again.';
+      }
+      if (m.contains('password')) return e.message; // e.g. too weak/short
       if (m.contains('expired') || m.contains('invalid')) {
         return 'That code is wrong or has expired. Request a new one.';
       }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/auth_service.dart';
+import 'email_password_form.dart';
 import 'otp_form.dart';
 import 'theme.dart';
 
@@ -102,15 +103,17 @@ class _LoginScreenState extends State<LoginScreen> {
                                   setState(() => _channel = s.first),
                             ),
                             const SizedBox(height: 16),
-                            OtpForm(
-                              channel: _channel,
-                              onSend: _channel == OtpChannelKind.email
-                                  ? auth.sendEmailCode
-                                  : auth.sendPhoneCode,
-                              onVerify: _channel == OtpChannelKind.email
-                                  ? auth.verifyEmailCode
-                                  : auth.verifyPhoneCode,
-                            ),
+                            if (_channel == OtpChannelKind.email)
+                              EmailPasswordForm(
+                                onSignIn: auth.signInWithPassword,
+                                onCreate: auth.signUpWithPassword,
+                              )
+                            else
+                              OtpForm(
+                                channel: OtpChannelKind.phone,
+                                onSend: auth.sendPhoneCode,
+                                onVerify: auth.verifyPhoneCode,
+                              ),
                             const SizedBox(height: 16),
                             Row(
                               children: [

@@ -197,9 +197,11 @@ void main() {
   });
 
   test('Axis credit card SMS with payment-gateway prefix', () {
-    final r = p('Spent INR 681\nusing Axis Bank Credit Card no. XX4676 on '
-        '07-11-26 21:04:05 IST at\nPAY*BLINKIT.\nAvl limit: INR 76269.72. '
-        'Not you? SMS BLOCK 4676 to +919951860002.');
+    final r = p(
+      'Spent INR 681\nusing Axis Bank Credit Card no. XX4676 on '
+      '07-11-26 21:04:05 IST at\nPAY*BLINKIT.\nAvl limit: INR 76269.72. '
+      'Not you? SMS BLOCK 4676 to +919951860002.',
+    );
     expect(r.amount, 681);
     expect(r.bank, 'Axis');
     expect(r.accountType, AccountType.creditCard);

@@ -5,6 +5,7 @@ import '../data/store.dart';
 import '../services/auth_service.dart';
 import '../services/sync_service.dart';
 import '../util/format.dart';
+import 'email_password_form.dart';
 import 'otp_form.dart';
 import 'theme.dart';
 
@@ -200,6 +201,18 @@ class _UpgradeGuestState extends State<_UpgradeGuest> {
   @override
   Widget build(BuildContext context) {
     final auth = context.read<AuthService?>()!;
+    void saved() {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Saved! Sign in with it on your other devices to see the same '
+            'data.',
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
@@ -211,7 +224,7 @@ class _UpgradeGuestState extends State<_UpgradeGuest> {
           ),
           const SizedBox(height: 4),
           const Text(
-            'Add your email or phone number to turn this guest '
+            'Add an email and password (or your phone number) to turn this guest '
             'account into a permanent one. Then you can sign in on any '
             'device and see the same data.',
           ),
@@ -225,28 +238,25 @@ class _UpgradeGuestState extends State<_UpgradeGuest> {
             onSelectionChanged: (s) => setState(() => _channel = s.first),
           ),
           const SizedBox(height: 12),
-          OtpForm(
-            channel: _channel,
-            verifyLabel: 'Verify & save',
-            onSend: _channel == OtpChannelKind.email
-                ? auth.linkEmail
-                : auth.linkPhone,
-            onVerify: (target, code) async {
-              await (_channel == OtpChannelKind.email
-                  ? auth.verifyLinkEmail(target, code)
-                  : auth.verifyLinkPhone(target, code));
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Saved! You can now sign in on other '
-                      'devices with it.',
-                    ),
-                  ),
-                );
-              }
-            },
-          ),
+          if (_channel == OtpChannelKind.email)
+            EmailPasswordForm(
+              saveOnly: true,
+              createLabel: 'Save my account',
+              onCreate: (email, password) async {
+                await auth.linkEmailPassword(email, password);
+                saved();
+              },
+            )
+          else
+            OtpForm(
+              channel: OtpChannelKind.phone,
+              verifyLabel: 'Verify & save',
+              onSend: auth.linkPhone,
+              onVerify: (target, code) async {
+                await auth.verifyLinkPhone(target, code);
+                saved();
+              },
+            ),
         ],
       ),
     );
