@@ -196,6 +196,19 @@ void main() {
     expect(p('Rs 75 debited from A/c XX1234 on 05-11-26').dateFound, isTrue);
   });
 
+  test('Axis credit card SMS with payment-gateway prefix', () {
+    final r = p('Spent INR 681\nusing Axis Bank Credit Card no. XX4676 on '
+        '07-11-26 21:04:05 IST at\nPAY*BLINKIT.\nAvl limit: INR 76269.72. '
+        'Not you? SMS BLOCK 4676 to +919951860002.');
+    expect(r.amount, 681);
+    expect(r.bank, 'Axis');
+    expect(r.accountType, AccountType.creditCard);
+    expect(r.last4, '4676');
+    expect(r.counterparty, 'BLINKIT');
+    expect(r.category, 'Groceries');
+    expect(r.date, DateTime(2026, 11, 7, 21, 4, 5));
+  });
+
   test('splitMessages splits on blank lines', () {
     final parts = SmsParser.splitMessages('msg one\nline2\n\n  \nmsg two');
     expect(parts, ['msg one\nline2', 'msg two']);

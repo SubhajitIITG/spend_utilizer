@@ -321,6 +321,9 @@ class SmsParser {
   static String _cleanCounterparty(String s) {
     var c = s.trim().replaceAll(RegExp(r'\s+'), ' ');
     c = c.replaceAll(RegExp(r'[.\-*]+$'), '').trim();
+    // Card networks prefix the payment gateway: "PAY*BLINKIT",
+    // "RAZ*SWIGGY", "PYU*Zomato" → keep just the merchant.
+    c = c.replaceFirst(RegExp(r'^[A-Za-z]{2,4}\s?\*\s?'), '').trim();
     final l = c.toLowerCase();
     // Reject phrases that describe the user's own account, not a payee.
     if (c.length < 2 ||
