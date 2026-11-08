@@ -42,7 +42,10 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter build apk --release
+      # Retry once: the first build downloads Gradle from github.com, which
+      # occasionally fails with a temporary server error (e.g. HTTP 504).
+      - name: Build APK
+        run: flutter build apk --release || (echo "Retrying after a failed download…" && sleep 30 && flutter build apk --release)
       - uses: actions/upload-artifact@v4
         with:
           name: spend-utilizer-android-apk
