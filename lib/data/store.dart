@@ -883,10 +883,11 @@ class AppStore extends ChangeNotifier {
   Iterable<Txn> txnsInMonth(DateTime month) =>
       txns.where((t) => _inMonth(t.date, month));
 
-  double spentIn(DateTime month) =>
-      txnsInMonth(month)
-          .where((t) => t.type == TxnType.debit)
-          .fold(0.0, (s, t) => s + t.amount);
+  /// Money spent in [month]. Credit-card bill payments are left out: the
+  /// purchases they pay for were already counted on the card.
+  double spentIn(DateTime month) => txnsInMonth(month)
+      .where((t) => t.type == TxnType.debit && t.category != cardBillCategory)
+      .fold(0.0, (s, t) => s + t.amount);
 
   double receivedIn(DateTime month) =>
       txnsInMonth(month)
@@ -896,6 +897,7 @@ class AppStore extends ChangeNotifier {
   List<CategoryTotal> categoryTotals(DateTime month, TxnType type) {
     final map = <String, double>{};
     for (final t in txnsInMonth(month).where((t) => t.type == type)) {
+      if (t.category == cardBillCategory) continue; // not spending
       map[t.category] = (map[t.category] ?? 0) + t.amount;
     }
     final list = map.entries.map((e) => CategoryTotal(e.key, e.value)).toList();

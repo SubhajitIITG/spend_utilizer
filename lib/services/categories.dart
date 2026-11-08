@@ -26,6 +26,7 @@ const debitCategories = <Category>[
   Category('Gifts & Donations', '🎁'),
   Category(friendsCategory, '👥'),
   Category(payeesCategory, '💸'),
+  Category(cardBillCategory, '💳'),
   Category('Others', '📦'),
 ];
 
@@ -47,6 +48,10 @@ const friendsCategory = 'Friends & Family';
 /// Money sent to people by bank transfer / UPI (not to shops).
 const payeesCategory = 'Payees';
 
+/// Paying a credit-card bill. Not new spending (the purchases were already
+/// counted on the card), so it is left out of spending totals.
+const cardBillCategory = 'Credit Card Bill';
+
 /// Categories that mean "we couldn't tell": payments in these are worth
 /// asking the user about.
 const unclearCategories = {'Others', 'Transfer', payeesCategory};
@@ -66,6 +71,16 @@ String emojiFor(String category) {
 /// Keyword → category rules for money going out. Matched against the
 /// merchant name and the full message text (lower-cased).
 const _debitRules = <String, List<String>>{
+  // First: "Bill Payment of … Credit Card" must not land in Utilities.
+  cardBillCategory: [
+    'credit card bill',
+    'card bill payment',
+    'bill payment of',
+    'deposited to card',
+    'ccbillpay',
+    'cred club',
+    'creditcard bill',
+  ],
   'Groceries': [
     'bigbasket',
     'blinkit',

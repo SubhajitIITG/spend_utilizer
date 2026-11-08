@@ -21,6 +21,7 @@ enum PaymentApp {
   bhim,
   mobiKwik,
   superMoney,
+  cred,
   slice,
   other,
 }
@@ -35,6 +36,7 @@ extension PaymentAppX on PaymentApp {
     PaymentApp.bhim => 'BHIM',
     PaymentApp.mobiKwik => 'MobiKwik',
     PaymentApp.superMoney => 'super.money',
+    PaymentApp.cred => 'CRED',
     PaymentApp.slice => 'slice',
     PaymentApp.other => 'payment app',
   };
@@ -163,6 +165,9 @@ class ScreenshotParser {
     if (lower.contains('paytm')) return PaymentApp.paytm;
     if (lower.contains('mobikwik') || lower.contains('@ikwik')) {
       return PaymentApp.mobiKwik;
+    }
+    if (RegExp(r'\bcred\b|bharat connect').hasMatch(lower)) {
+      return PaymentApp.cred;
     }
     if (RegExp(r'super\.?\s?money|@superyes').hasMatch(lower)) {
       return PaymentApp.superMoney;
@@ -328,6 +333,32 @@ class ScreenshotParser {
         }
       }
       if (name.isNotEmpty || upi.isNotEmpty) return (name, upi);
+    }
+    if (!received) {
+      // CRED receipts: "Subhajit paid" / "Payee Name".
+      for (var i = 0; i + 1 < lines.length; i++) {
+        if (!RegExp(
+          r'^[A-Za-z][A-Za-z .]{0,30} paid$',
+          caseSensitive: false,
+        ).hasMatch(lines[i])) {
+          continue;
+        }
+        final next = _cleanName(lines[i + 1]);
+        if (next.isNotEmpty && !_skipForName(lines[i + 1])) return (next, '');
+      }
+      // Credit-card bill with no payee line ("deposited to card"): name it
+      // after the card's bank.
+      final all = lines.join('\n').toLowerCase();
+      if (all.contains('deposited to card') ||
+          all.contains('credit card bill')) {
+        final bank = SmsParser.bankIn(_withoutUpiIds(lines.join('\n')));
+        return (
+          bank == 'Unknown Bank'
+              ? 'Credit card bill'
+              : '$bank Credit Card bill',
+          '',
+        );
+      }
     }
     return ('', '');
   }
@@ -506,6 +537,12 @@ class ScreenshotParser {
     }
     for (final l in lines) {
       final m = RegExp(r'^(\d{12})$').firstMatch(l.replaceAll(' ', ''));
+      if (m != null) return m.group(1)!;
+    }
+    // Last resort: a lone 12-digit number anywhere, e.g. CRED's
+    // "02:40pm, 20th oct'26 | 665928017419".
+    for (final l in lines) {
+      final m = RegExp(r'(?<![\dA-Za-z])(\d{12})(?![\dA-Za-z])').firstMatch(l);
       if (m != null) return m.group(1)!;
     }
     return '';

@@ -250,6 +250,69 @@ RuPay xx7731
 To: Vendor Stall 03
 paytm.d1234567890@pty''';
 
+// CRED credit-card bill payment.
+const credBill = '''19:26
+84%
+transaction detail
+AMOUNT
+₹2,000
+PAYMENT SUCCESSFUL
+payment received
+24 OCT 12:00 PM
+paid using upi
+view details
+deposited to card
+24 OCT 12:01 PM
+SBI will consider 24 Oct as
+the payment date. contact
+support for queries.
+know more
+order id
+XA123BCD456E
+utr
+1ABC2D33EFG45HIJKL6M7NO8PQR1234
+0630
+Bharat Connect transaction id
+DP123456A7B8CDEFG90H
+Download documents''';
+
+// CRED bill for an Axis card, with a "100% late fee protection" line.
+const credBillAxis = '''19:28
+83%
+transaction detail
+AMOUNT
+₹1,104
+PAYMENT SUCCESSFUL
+payment received
+20 SEP 2:53 PM
+paid using upi
+view details
+deposited to card
+20 SEP 2:53 PM
+Axis Bank has confirmed your
+payment and will consider 20
+Sep as the payment date.
+contact support for queries
+know more
+100% late fee protection
+know more
+order id
+AB1CD2EFGH3J
+utr
+ABC1D234EFGHIJKL5M6NOPQRST123
+456789
+Bharat Connect transaction id
+DP123456ABC1234D5E67''';
+
+// CRED payment receipt: "<payer> paid" / "<payee>".
+const credPaid = '''Rahul paid
+Amit Verma
+₹10
+Paid via CRED
+paid securely by
+CRED
+02:40pm, 20th oct'26 | 665912345678''';
+
 void main() {
   final now = DateTime(2026, 11, 8, 12);
   ParsedScreenshot p(String s) {
@@ -590,6 +653,77 @@ void main() {
       expect(acc.bank, 'Slice');
       expect(acc.type, AccountType.creditCard);
       expect(acc.last4, '7731');
+    });
+  });
+
+  group('CRED', () {
+    test('credit-card bill payment', () {
+      final r = p(credBill);
+      expect(r.app, PaymentApp.cred);
+      expect(r.status, PaymentStatus.success);
+      expect(r.received, isFalse);
+      expect(r.amount, 2000);
+      expect(r.who, 'SBI Credit Card bill');
+      expect(r.date, DateTime(2026, 10, 24, 12, 0));
+      expect(r.utr, ''); // CRED's "utr" here isn't a 12-digit UPI reference
+    });
+
+    test('credit-card bill for an Axis card', () {
+      final r = p(credBillAxis);
+      expect(r.app, PaymentApp.cred);
+      expect(r.amount, 1104);
+      expect(r.who, 'Axis Credit Card bill');
+      expect(r.date, DateTime(2026, 9, 20, 14, 53));
+      expect(r.utr, '');
+    });
+
+    test('payment receipt', () {
+      final r = p(credPaid);
+      expect(r.app, PaymentApp.cred);
+      expect(r.received, isFalse);
+      expect(r.amount, 10);
+      expect(r.who, 'Amit Verma');
+      expect(r.date, DateTime(2026, 10, 20, 14, 40));
+      expect(r.utr, '665912345678');
+    });
+
+    test('neither is called suspicious', () async {
+      for (final s in [credBill, credBillAxis, credPaid]) {
+        final r = await check(s);
+        expect(
+          r.verdict,
+          isNot(Verdict.suspicious),
+          reason: r.checks.map((c) => c.text).join('\n'),
+        );
+      }
+    });
+
+    test('bill payments are filed as Credit Card Bill, not spending', () async {
+      final store = AppStore(storage: MemoryStorage());
+      await store.load();
+      final e = ChatEngine(store);
+      for (final s in [credBill, credBillAxis, paytmBill, mobiKwik]) {
+        e.handleScreenshot(s, now: now);
+        e.handle(addShotOption);
+        if (e.active) e.cancel(); // skip "is this account yours?"
+      }
+      expect(store.txns.length, 4);
+      expect(
+        store.txns.every((t) => t.category == 'Credit Card Bill'),
+        isTrue,
+        reason: store.txns.map((t) => t.category).join(', '),
+      );
+      e.handleScreenshot(credPaid, now: now);
+      e.handle(addShotOption);
+      final oct = DateTime(2026, 10);
+      // Only the ₹10 payment counts as spending in October.
+      expect(store.spentIn(oct), 10);
+      expect(
+        store
+            .categoryTotals(oct, TxnType.debit)
+            .any((c) => c.category == 'Credit Card Bill'),
+        isFalse,
+      );
     });
   });
 }
