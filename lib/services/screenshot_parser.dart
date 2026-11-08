@@ -49,6 +49,9 @@ class ParsedScreenshot {
   /// True when the screenshot shows money coming in ("Received from").
   final bool received;
   final double amount;
+
+  /// The ₹ sign wasn't read cleanly, so the amount needs a second look.
+  final bool amountGuessed;
   final String counterparty;
   final String upiId;
   final String bank;
@@ -86,6 +89,7 @@ class ParsedScreenshot {
     required this.status,
     required this.received,
     required this.amount,
+    this.amountGuessed = false,
     required this.counterparty,
     required this.upiId,
     required this.bank,
@@ -117,8 +121,9 @@ class ScreenshotParser {
     if (lines.isEmpty) return null;
     final lower = text.toLowerCase();
 
-    final amount = _amount(lines);
-    if (amount == null) return null;
+    final found = _amount(lines);
+    if (found == null) return null;
+    final (amount, amountGuessed) = found;
 
     final received = _isReceived(lines);
     final (counterparty, upiId) = _counterparty(lines, received);
@@ -126,10 +131,11 @@ class ScreenshotParser {
     final (bank, last4, accountType) = _ownAccount(lines, received);
 
     return ParsedScreenshot(
-      app: _app(lower),
+      app: _app(_withoutUpiIds(text).toLowerCase()),
       status: _status(lower),
       received: received,
       amount: amount,
+      amountGuessed: amountGuessed,
       counterparty: counterparty,
       upiId: upiId,
       bank: bank,
@@ -229,7 +235,9 @@ class ScreenshotParser {
     caseSensitive: false,
   );
 
-  static double? _amount(List<String> lines) {
+  /// Returns the amount and whether the ₹ sign had to be guessed (e.g. a
+  /// bold "₹120" read as "7120").
+  static (double, bool)? _amount(List<String> lines) {
     for (final l in lines) {
       if (RegExp(
         r'(balance|limit|cashback|reward|offer|earned)',
@@ -240,7 +248,7 @@ class ScreenshotParser {
       final m = _currencyAmount.firstMatch(l);
       if (m != null) {
         final v = double.tryParse(m.group(1)!.replaceAll(',', ''));
-        if (v != null && v > 0 && v < 10000000) return v;
+        if (v != null && v > 0 && v < 10000000) return (v, false);
       }
     }
     // "Paid ₹26" where OCR misread the ₹ as Z, %, *, ? or dropped it.
@@ -252,18 +260,44 @@ class ScreenshotParser {
       ).firstMatch(l);
       if (m == null) continue;
       final v = double.tryParse(m.group(1)!.replaceAll(',', ''));
-      if (v != null && v > 0 && v < 10000000) return v;
+      if (v != null && v > 0 && v < 10000000) return (v, true);
     }
     // A big amount on its own line, e.g. "1,250" with the ₹ sign lost.
-    for (final l in lines) {
+    for (var i = 0; i < lines.length; i++) {
+      final l = lines[i];
       if (!RegExp(r'^([0-9]{1,3}(?:,[0-9]{2,3})+|[0-9]{1,6})(?:\.[0-9]{1,2})?$')
           .hasMatch(l)) {
         continue;
       }
       final v = double.tryParse(l.replaceAll(',', ''));
-      if (v != null && v > 0) return v;
+      if (v == null || v <= 0) continue;
+      return (_fixRupeeAsSeven(l, v, lines, i), true);
     }
     return null;
+  }
+
+  /// A bold ₹ is often read as "7": "₹120" → "7120". Undo that when the
+  /// screen shows the shorter number elsewhere ("You Sent ₹120"), or when a
+  /// 4+ digit amount has no comma (these apps always write ₹1,250).
+  static double _fixRupeeAsSeven(
+    String line,
+    double v,
+    List<String> lines,
+    int at,
+  ) {
+    final m = RegExp(r'^7([0-9]+(?:\.[0-9]{1,2})?)$').firstMatch(line);
+    if (m == null) return v;
+    final rest = m.group(1)!;
+    final restValue = double.tryParse(rest);
+    if (restValue == null || restValue <= 0 || rest.startsWith('0')) return v;
+    final restInt = rest.split('.').first;
+    final elsewhere = RegExp('(?<![0-9,.])${RegExp.escape(restInt)}(?![0-9,])');
+    for (var k = 0; k < lines.length; k++) {
+      if (k != at && elsewhere.hasMatch(lines[k])) return restValue;
+    }
+    // "7120" with no comma: a real ₹7,120 would be shown with a comma.
+    if (restInt.length >= 3 && !line.contains('.')) return restValue;
+    return v;
   }
 
   // ---------------------------------------------------------- counterparty
@@ -299,7 +333,7 @@ class ScreenshotParser {
         final cand = lines[j];
         if (_upiRe.hasMatch(cand) && !cand.trim().contains(' ')) {
           upi = _upiRe.firstMatch(cand)!.group(1)!;
-        } else if (!_skipForName(cand)) {
+        } else if (!_skipForName(cand) && !_anyLabel.hasMatch(cand)) {
           name = _cleanName(cand);
         }
         j++;
@@ -328,6 +362,21 @@ class ScreenshotParser {
           final m2 = _upiRe.firstMatch(lines[k + 1]);
           if (m2 != null) {
             upi = m2.group(1)!;
+            break;
+          }
+        }
+      }
+      // Only the UPI ID under the label: the name is often in the header,
+      // on the line right above the same UPI ID ("Juice Center").
+      if (name.isEmpty && upi.isNotEmpty) {
+        for (var k = 1; k < lines.length; k++) {
+          if (!lines[k].contains(upi)) continue;
+          final above = lines[k - 1];
+          if (!_skipForName(above) &&
+              !_anyLabel.hasMatch(above) &&
+              !RegExp(r'^\d').hasMatch(above) &&
+              !above.contains('@')) {
+            name = _cleanName(above);
             break;
           }
         }
@@ -426,10 +475,12 @@ class ScreenshotParser {
             caseSensitive: false,
           )
         : RegExp(
-            r'^(from\b|paid from|debited from|debited account)',
+            r'^(from\b|paid from|debited from|debited account|payment method|'
+            r'paid using|paid via|pay using)',
             caseSensitive: false,
           );
-    final masked = RegExp(r'(?<![a-wyzA-WYZ])[xX*•]+\s?(\d{3,6})\b');
+    // Usually 4 digits; some apps show only 2 ("Axis CC XX24").
+    final masked = RegExp(r'(?<![a-wyzA-WYZ])[xX*•]+\s?(\d{2,6})\b');
     final bankDigits = RegExp(
       r'bank\s*[-–:•·|]*\s*(\d{4})\b',
       caseSensitive: false,
@@ -768,6 +819,16 @@ class ScreenshotChecker {
         );
       case PaymentStatus.success:
         break;
+    }
+
+    if (p.amountGuessed) {
+      checks.add(
+        ScreenshotCheck(
+          CheckLevel.warn,
+          'The ₹ sign wasn\'t clear, so I read the amount as '
+          '${money(p.amount)}. Please check it (tap Edit to fix).',
+        ),
+      );
     }
 
     // 2. Date sanity

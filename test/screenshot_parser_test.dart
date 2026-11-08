@@ -47,7 +47,8 @@ Transaction ID
 T2611050858123456789012
 UTR: 630908581234''';
 
-const paytmPaid = '''Paid Successfully
+const paytmPaid = '''Paytm
+Paid Successfully
 Z250
 To: CHAI POINT
 chaipoint@paytm

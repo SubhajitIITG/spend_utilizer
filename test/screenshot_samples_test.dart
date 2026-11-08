@@ -250,6 +250,36 @@ RuPay xx7731
 To: Vendor Stall 03
 paytm.d1234567890@pty''';
 
+// UPI-on-credit-card screen: payee in the header, card under "Payment
+// method", and the bold "₹120" read by OCR as "7120".
+const cardUpiPaid = '''23:10
+44%
+J
+Juice Corner
+paytm.a1b2c3d@pty
+Help
+7120
+Payment Successful
+November 3 at 10:24 PM
+You have earned 3% cashback
+Paid to:
+paytm.a1b2c3d@pty
+UPI Reference ID
+667312345678
+Payment method
+Axis CC XX24
+Check limit
+View more
+Share
+Past Transactions
+November '26
+You Sent
+7120
+3rd Nov • 10:24 PM
+From
+Pay again
+Done''';
+
 // CRED credit-card bill payment.
 const credBill = '''19:26
 84%
@@ -724,6 +754,49 @@ void main() {
             .any((c) => c.category == 'Credit Card Bill'),
         isFalse,
       );
+    });
+  });
+
+  group('₹ read as 7', () {
+    test(
+      'UPI on a credit card: payee in header, card under Payment method',
+      () {
+        final r = p(cardUpiPaid);
+        expect(r.amount, 120);
+        expect(r.amountGuessed, isTrue);
+        expect(r.app, PaymentApp.other); // "paytm" only inside the UPI ID
+        expect(r.received, isFalse);
+        expect(r.who, 'Juice Corner');
+        expect(r.upiId, 'paytm.a1b2c3d@pty');
+        expect(r.date, DateTime(2026, 11, 3, 22, 24));
+        expect(r.utr, '667312345678');
+        expect(r.bank, 'Axis');
+        expect(r.last4, '24');
+        expect(r.accountType, AccountType.creditCard);
+      },
+    );
+
+    test('fixed using the same amount elsewhere on the screen', () {
+      final shown = cardUpiPaid.replaceFirst(
+        'You Sent\n7120',
+        'You Sent\n₹120',
+      );
+      expect(p(shown).amount, 120);
+    });
+
+    test('a real amount starting with 7 is left alone', () {
+      expect(p(cardUpiPaid.replaceAll('7120', '₹7,120')).amount, 7120);
+      expect(p(cardUpiPaid.replaceAll('7120', '7,120')).amount, 7120);
+      expect(p(cardUpiPaid.replaceAll('7120', '₹712')).amount, 712);
+    });
+
+    test('the guess is flagged for the user to check', () async {
+      final r = await check(cardUpiPaid);
+      expect(
+        r.checks.map((c) => c.text).join(),
+        contains("₹ sign wasn't clear"),
+      );
+      expect(r.verdict, isNot(Verdict.suspicious));
     });
   });
 }
