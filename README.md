@@ -28,7 +28,7 @@ for you:
 | 💸 **Payees** | Money sent to people (NEFT/IMPS/bank transfer, UPI to a person) is filed under **Payees**; filter it in History |
 | 🏦 **Accounts** | Rename a bank, give cards nicknames (e.g. "HDFC Millennia"), change the type, add accounts manually |
 | 📥 **Excel export** | Download icon. Saves a `.xlsx` with sheets for Transactions, Monthly Summary, Category Summary, Accounts, Lend & Borrow and Reminders |
-| 🔐 **Login & sync** | Sign in with **email + password**, a **phone (SMS) code**, or as a **guest**. Your data then syncs across all your devices. Works offline and catches up when you're back online |
+| 🔐 **Login & sync** | Sign in with **email + password** or as a **guest** (phone/SMS login is built in but switched off until an SMS provider is set up: `phoneLoginEnabled` in `lib/config.dart`). Your data then syncs across all your devices. Works offline and catches up when you're back online |
 
 Data is always saved on the device first. Cloud sync is optional and needs a
 free Supabase project: see **[SETUP.md](SETUP.md)** (about 10 minutes).

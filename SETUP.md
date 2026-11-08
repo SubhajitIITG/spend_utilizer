@@ -32,7 +32,7 @@ Go to **Authentication** → **Sign In / Providers**:
 |---|---|
 | **Email** | On by default. Turn **Confirm email** OFF (see below). |
 | **Guest** | Turn on **Allow anonymous sign-ins**. |
-| **Phone** | Turn on **Phone** and connect an SMS provider (Twilio, MessageBird, Vonage or Textlocal). SMS costs money, and Indian numbers need DLT registration with the provider. Skip this to begin with: email and guest work without it. |
+| **Phone** | Turn on **Phone** and connect an SMS provider (Twilio, MessageBird, Vonage or Textlocal). SMS costs money, and Indian numbers need DLT registration with the provider. Skip this to begin with: email and guest work without it. When it's set up, set `phoneLoginEnabled = true` in `lib/config.dart`. |
 
 ### Turn off "Confirm email"
 

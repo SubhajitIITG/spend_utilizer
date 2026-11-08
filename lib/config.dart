@@ -28,6 +28,11 @@ class AppConfig {
         'gsImV4cCI6MjEwOTY4MzcyOH0.fG0o8VUr_ZJl6N8ww9BoOn9dX8SU8ZjlkmC3UB3RykI',
   );
 
+  /// Phone (SMS code) login. Off: it needs a paid SMS provider connected
+  /// in Supabase (and DLT registration for Indian numbers). Set to true
+  /// once that is set up and the Email/Phone switch comes back.
+  static const phoneLoginEnabled = false;
+
   /// Country code added to 10-digit phone numbers.
   static const defaultCountryCode = '+91';
 

@@ -180,6 +180,7 @@ void main() {
 
     expect(find.text('Sign in'), findsWidgets);
     expect(find.text('Continue as guest'), findsOneWidget);
+    expect(find.text('Phone'), findsNothing); // phone login is switched off
 
     // Switch to "Create account".
     await tap(find.text('New here? Create an account'));

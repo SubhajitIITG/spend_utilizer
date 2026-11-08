@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/auth_service.dart';
+import '../config.dart';
 import 'email_password_form.dart';
 import 'otp_form.dart';
 import 'theme.dart';
@@ -85,24 +86,26 @@ class _LoginScreenState extends State<LoginScreen> {
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 18),
-                            SegmentedButton<OtpChannelKind>(
-                              segments: const [
-                                ButtonSegment(
-                                  value: OtpChannelKind.email,
-                                  icon: Icon(Icons.email_outlined),
-                                  label: Text('Email'),
-                                ),
-                                ButtonSegment(
-                                  value: OtpChannelKind.phone,
-                                  icon: Icon(Icons.phone),
-                                  label: Text('Phone'),
-                                ),
-                              ],
-                              selected: {_channel},
-                              onSelectionChanged: (s) =>
-                                  setState(() => _channel = s.first),
-                            ),
-                            const SizedBox(height: 16),
+                            if (AppConfig.phoneLoginEnabled) ...[
+                              SegmentedButton<OtpChannelKind>(
+                                segments: const [
+                                  ButtonSegment(
+                                    value: OtpChannelKind.email,
+                                    icon: Icon(Icons.email_outlined),
+                                    label: Text('Email'),
+                                  ),
+                                  ButtonSegment(
+                                    value: OtpChannelKind.phone,
+                                    icon: Icon(Icons.phone),
+                                    label: Text('Phone'),
+                                  ),
+                                ],
+                                selected: {_channel},
+                                onSelectionChanged: (s) =>
+                                    setState(() => _channel = s.first),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
                             if (_channel == OtpChannelKind.email)
                               EmailPasswordForm(
                                 onSignIn: auth.signInWithPassword,
@@ -135,7 +138,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              'Start right away. You can add your email or phone '
+                              'Start right away. You can add an email and password '
                               'later to use the same data on other devices.',
                               style: t.bodySmall,
                               textAlign: TextAlign.center,

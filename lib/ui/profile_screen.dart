@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../config.dart';
 import '../data/store.dart';
 import '../services/auth_service.dart';
 import '../services/sync_service.dart';
@@ -158,7 +159,7 @@ class ProfileScreen extends StatelessWidget {
         content: Text(
           guest
               ? 'You are using a guest account. If you sign out without adding '
-                    'an email or phone number first, your data CANNOT be '
+                    'an email and password first, your data CANNOT be '
                     'recovered.'
               : 'Your data stays safe in the cloud and will come back when '
                     'you sign in again.',
@@ -224,20 +225,28 @@ class _UpgradeGuestState extends State<_UpgradeGuest> {
           ),
           const SizedBox(height: 4),
           const Text(
-            'Add an email and password (or your phone number) to turn this guest '
+            'Add an email and password to turn this guest '
             'account into a permanent one. Then you can sign in on any '
             'device and see the same data.',
           ),
           const SizedBox(height: 12),
-          SegmentedButton<OtpChannelKind>(
-            segments: const [
-              ButtonSegment(value: OtpChannelKind.email, label: Text('Email')),
-              ButtonSegment(value: OtpChannelKind.phone, label: Text('Phone')),
-            ],
-            selected: {_channel},
-            onSelectionChanged: (s) => setState(() => _channel = s.first),
-          ),
-          const SizedBox(height: 12),
+          if (AppConfig.phoneLoginEnabled) ...[
+            SegmentedButton<OtpChannelKind>(
+              segments: const [
+                ButtonSegment(
+                  value: OtpChannelKind.email,
+                  label: Text('Email'),
+                ),
+                ButtonSegment(
+                  value: OtpChannelKind.phone,
+                  label: Text('Phone'),
+                ),
+              ],
+              selected: {_channel},
+              onSelectionChanged: (s) => setState(() => _channel = s.first),
+            ),
+            const SizedBox(height: 12),
+          ],
           if (_channel == OtpChannelKind.email)
             EmailPasswordForm(
               saveOnly: true,
