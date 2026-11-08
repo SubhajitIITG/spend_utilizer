@@ -904,6 +904,19 @@ class AppStore extends ChangeNotifier {
       )
       .fold(0.0, (s, t) => s + t.amount);
 
+  /// Investments (SIP, FD, RD, stocks, bonds, other) in [year], newest
+  /// first.
+  List<Txn> investmentsInYear(int year) =>
+      txns
+          .where(
+            (t) =>
+                t.type == TxnType.debit &&
+                investmentCategories.contains(t.category) &&
+                t.date.year == year,
+          )
+          .toList()
+        ..sort((a, b) => b.date.compareTo(a.date));
+
   /// SIP payments in [year], newest first.
   List<Txn> sipsInYear(int year) =>
       txns

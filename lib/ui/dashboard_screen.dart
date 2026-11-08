@@ -93,10 +93,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 child: _AccountsOverview(store: store, month: _month),
               ),
-              if (store.sipsInYear(_month.year).isNotEmpty)
+              if (store.investmentsInYear(_month.year).isNotEmpty)
                 _Section(
-                  title: 'SIP & Mutual Funds',
-                  child: _SipOverview(store: store, month: _month),
+                  title: 'Investments',
+                  child: _InvestmentsOverview(store: store, month: _month),
                 ),
               _Section(
                 title: 'Lend & borrow',
@@ -489,77 +489,91 @@ class _MerchantReview extends StatelessWidget {
   }
 }
 
-class _SipOverview extends StatelessWidget {
+class _InvestmentsOverview extends StatelessWidget {
   final AppStore store;
   final DateTime month;
-  const _SipOverview({required this.store, required this.month});
+  const _InvestmentsOverview({required this.store, required this.month});
 
   @override
   Widget build(BuildContext context) {
-    final year = store.sipsInYear(month.year);
+    final year = store.investmentsInYear(month.year);
     final thisMonth = year.where((t) => t.date.month == month.month).toList();
-    // One row per fund (merchant), with this month's total.
-    final byFund = <String, (double, int)>{};
-    for (final t in thisMonth) {
-      final name = store.sipFundName(t);
-      final cur = byFund[name] ?? (0.0, 0);
-      byFund[name] = (cur.$1 + t.amount, cur.$2 + 1);
-    }
-    final yearTotal = year.fold(0.0, (s, t) => s + t.amount);
-    final monthTotal = thisMonth.fold(0.0, (s, t) => s + t.amount);
+    double sum(Iterable<Txn> ts) => ts.fold(0.0, (s, t) => s + t.amount);
     final t = Theme.of(context).textTheme;
+
+    // SIP funds this month, grouped by fund.
+    final funds = <String, double>{};
+    for (final x in thisMonth.where((x) => x.category == sipCategory)) {
+      final name = store.sipFundName(x);
+      funds[name] = (funds[name] ?? 0) + x.amount;
+    }
+
+    Widget figure(String label, double v, {Color? color}) => Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: t.labelMedium),
+          Text(money(v), style: t.titleLarge?.copyWith(color: color)),
+        ],
+      ),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('This month', style: t.labelMedium),
-                  Text(
-                    money(monthTotal),
-                    style: t.titleLarge?.copyWith(color: Royal.income(context)),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('So far in ${month.year}', style: t.labelMedium),
-                  Text(money(yearTotal), style: t.titleLarge),
-                ],
-              ),
-            ),
+            figure('This month', sum(thisMonth), color: Royal.income(context)),
+            figure('So far in ${month.year}', sum(year)),
           ],
         ),
-        if (byFund.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(top: 10),
-            child: Text('No SIP payments this month yet.'),
-          )
-        else ...[
-          const SizedBox(height: 8),
-          for (final e in byFund.entries)
+        const SizedBox(height: 8),
+        // One row per investment type used this year.
+        for (final cat in investmentCategoryOrder)
+          if (year.any((x) => x.category == cat)) ...[
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: const Text('📈', style: TextStyle(fontSize: 20)),
-              title: Text(e.key, overflow: TextOverflow.ellipsis),
+              leading: Text(
+                emojiFor(cat),
+                style: const TextStyle(fontSize: 20),
+              ),
+              title: Text(
+                cat == otherInvestCategory ? 'Other investments' : cat,
+              ),
               subtitle: Text(
-                '${e.value.$2} payment${e.value.$2 == 1 ? '' : 's'}',
+                '${money(sum(year.where((x) => x.category == cat)))} '
+                'in ${month.year}',
               ),
               trailing: Text(
-                money(e.value.$1),
+                money(sum(thisMonth.where((x) => x.category == cat))),
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
-        ],
+            if (cat == sipCategory)
+              for (final f in funds.entries)
+                Padding(
+                  padding: const EdgeInsets.only(left: 40, bottom: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          f.key,
+                          style: t.bodySmall,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(money(f.value), style: t.bodySmall),
+                    ],
+                  ),
+                ),
+          ],
         const SizedBox(height: 4),
-        Text('SIPs are counted as Invested, not Spent.', style: t.bodySmall),
+        Text(
+          'Right column: this month. Investments are counted as Invested, '
+          'not Spent.',
+          style: t.bodySmall,
+        ),
       ],
     );
   }

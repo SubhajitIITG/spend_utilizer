@@ -21,7 +21,11 @@ const debitCategories = <Category>[
   Category('Travel', '✈️'),
   Category('EMI & Loans', '🏦'),
   Category(sipCategory, '📈'),
-  Category('Investments', '💹'),
+  Category(fdCategory, '🏛️'),
+  Category(rdCategory, '📅'),
+  Category(stocksCategory, '📊'),
+  Category(bondsCategory, '📜'),
+  Category(otherInvestCategory, '💹'),
   Category('Insurance', '🛡️'),
   Category('Personal Care', '💇'),
   Category('Gifts & Donations', '🎁'),
@@ -52,7 +56,24 @@ const payeesCategory = 'Payees';
 /// Monthly SIPs / mutual fund purchases. Saved, not spent: shown as
 /// "Invested" and left out of spending totals (with other investments).
 const sipCategory = 'SIP & Mutual Funds';
-const investmentCategories = {sipCategory, 'Investments'};
+const fdCategory = 'Fixed Deposit';
+const rdCategory = 'Recurring Deposit';
+const stocksCategory = 'Stocks';
+const bondsCategory = 'Bonds';
+
+/// NPS, PPF, digital gold… (kept as "Investments" for existing data).
+const otherInvestCategory = 'Investments';
+
+/// Investment types, in the order the Dashboard lists them.
+const investmentCategoryOrder = [
+  sipCategory,
+  fdCategory,
+  rdCategory,
+  stocksCategory,
+  bondsCategory,
+  otherInvestCategory,
+];
+final investmentCategories = investmentCategoryOrder.toSet();
 
 /// Paying a credit-card bill. Not new spending (the purchases were already
 /// counted on the card), so it is left out of spending totals.
@@ -136,6 +157,89 @@ const _debitRules = <String, List<String>>{
     'invesco',
     'hsbc mf',
     'bandhan mf',
+  ],
+  bondsCategory: [
+    'bond',
+    'sgb',
+    'sovereign gold',
+    'rbi retail direct',
+    'rbi bonds',
+    'ncd',
+    'debenture',
+    'wint wealth',
+    'grip invest',
+    'goldenpi',
+    'indiabonds',
+    'tbill',
+    't-bill',
+    'treasury bill',
+    'g-sec',
+    'gsec',
+  ],
+  fdCategory: [
+    'fixed deposit',
+    'fd booked',
+    'fd booking',
+    'fd opened',
+    'fd opening',
+    'fd created',
+    'fd a/c',
+    'fd ac',
+    'fd account',
+    'fd no',
+    'new fd',
+    'term deposit',
+    'tdr',
+    'stable money',
+    'flexi deposit',
+  ],
+  rdCategory: [
+    'recurring deposit',
+    'rd instal',
+    'rd a/c',
+    'rd ac',
+    'rd account',
+    'rd no',
+    'new rd',
+  ],
+  stocksCategory: [
+    'zerodha',
+    'upstox',
+    'angel one',
+    'angel broking',
+    'icici direct',
+    'icicidirect',
+    'icici securities',
+    'hdfc securities',
+    'kotak securities',
+    'sharekhan',
+    '5paisa',
+    'motilal oswal fin',
+    'axis direct',
+    'sbicap securities',
+    'paytm money stocks',
+    'groww stocks',
+    'dhan.co',
+    'nsccl',
+    'nse clearing',
+    'shares',
+    'stock',
+    'equity',
+    'ipo',
+    'smallcase',
+    'indmoney',
+  ],
+  otherInvestCategory: [
+    'nps',
+    'national pension',
+    'ppf',
+    'public provident',
+    'sukanya',
+    'digital gold',
+    'safegold',
+    'mmtc-pamp',
+    'augmont',
+    'jar app',
   ],
   'Groceries': [
     'bigbasket',
@@ -315,15 +419,6 @@ const _debitRules = <String, List<String>>{
     'books',
   ],
   'EMI & Loans': ['emi', 'loan', 'bajaj finserv', 'nach', 'ecs'],
-  'Investments': [
-    'zerodha',
-    'upstox',
-    'nps',
-    'ppf',
-    'smallcase',
-    'angel one',
-    'indmoney',
-  ],
   'Insurance': ['insurance', 'lic', 'policybazaar', 'premium', 'acko'],
   'Personal Care': ['salon', 'spa', 'urban company', 'urbanclap', 'parlour'],
   'Gifts & Donations': ['donation', 'charity', 'temple', 'gift', 'ketto'],
@@ -334,7 +429,17 @@ const _creditRules = <String, List<String>>{
   'Cashback & Rewards': ['cashback', 'cash back', 'reward', 'scratch card'],
   'Salary': ['salary', 'sal ', 'payroll', 'neft-sal', 'stipend'],
   'Interest': ['interest', 'int.pd', 'int pd', 'int.cr'],
-  'Investment Returns': ['dividend', 'redemption', 'maturity'],
+  'Investment Returns': [
+    'dividend',
+    'redemption',
+    'maturity',
+    'matured',
+    'fd closure',
+    'fd closed',
+    'premature',
+    'rd closure',
+    'interest on fd',
+  ],
 };
 
 final _patternCache = <String, RegExp>{};

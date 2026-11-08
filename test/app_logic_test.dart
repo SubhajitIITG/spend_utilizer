@@ -340,4 +340,78 @@ void main() {
       ]);
     });
   });
+
+  group('FD, RD, stocks and bonds', () {
+    const samples = {
+      'Rs.50,000.00 debited from A/c XX1234 on 05-11-26 towards Fixed '
+              'Deposit booking FD No 1234567. -SBI':
+          'Fixed Deposit',
+      'INR 1,00,000 debited from A/c XX1234 on 05-11-26 for new FD opened '
+              'online. -HDFC':
+          'Fixed Deposit',
+      'Rs 2,000 debited from A/c XX1234 on 05-11-26 towards RD instalment '
+              'RD A/c XX9876. -SBI':
+          'Recurring Deposit',
+      'Rs.25,000 debited from A/c XX1234 on 05-11-26 to ZERODHA BROKING '
+              'LTD funds transfer -ICICI':
+          'Stocks',
+      'Rs 10,000 debited from A/c XX1234 on 05-11-26 to VPA '
+              'upstox@hdfcbank (UPI Ref No 612345600002) -SBI':
+          'Stocks',
+      'Rs.15,000 debited from A/c XX1234 on 05-11-26 for Sovereign Gold '
+              'Bond SGB 2026-27 -SBI':
+          'Bonds',
+      'Rs 20,000 debited from A/c XX1234 on 05-11-26 to RBI RETAIL DIRECT '
+              'T-Bill purchase -HDFC':
+          'Bonds',
+      'Rs.5,000 debited from A/c XX1234 on 05-11-26 towards NPS '
+              'contribution -SBI':
+          'Investments',
+      'Rs.3,000 debited from A/c XX1234 on 05-11-26 ACH D- BSE LIMITED '
+              '-SBI':
+          'SIP & Mutual Funds',
+    };
+
+    test('each investment type is recognised', () {
+      samples.forEach((sms, category) {
+        expect(SmsParser.parse(sms)!.category, category, reason: sms);
+      });
+      // Look-alikes stay where they belong.
+      expect(
+        SmsParser.parse(
+          'Spent Rs.500 On HDFC Bank Credit Card xx1111 At '
+          'BIGBASKET On 2026-11-04:10:00:00',
+        )!.category,
+        'Groceries',
+      );
+      expect(
+        SmsParser.parse(
+          'Rs.300 debited from A/c XX1234 on 03-11-26 '
+          'to VPA cardshop@ybl (UPI Ref 612345600003) -SBI',
+        )!.category,
+        isNot('Recurring Deposit'),
+      );
+    });
+
+    test('FD maturity is an investment return', () {
+      expect(
+        SmsParser.parse(
+          'Your A/c XX1234 is credited with Rs.52,500 on '
+          '05-11-26 towards FD closure on maturity -SBI',
+        )!.category,
+        'Investment Returns',
+      );
+    });
+
+    test('all of them count as Invested, none as Spent', () async {
+      final s = await newStore();
+      for (final sms in samples.keys) {
+        s.addFromSms(sms);
+      }
+      final nov = DateTime(2026, 11);
+      expect(s.spentIn(nov), 0);
+      expect(s.investedIn(nov), 230000);
+      expect(s.investmentsInYear(2026).length, samples.length);
+    });
+  });
 }
