@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 /// Reads text from an image on the device (Google ML Kit). Nothing is
@@ -7,7 +9,14 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 class OcrService {
   static bool get isSupported => Platform.isAndroid || Platform.isIOS;
 
-  static Future<String> readText(String imagePath) async {
+  /// The reader in use. Tests replace it, since ML Kit only runs on a
+  /// phone.
+  @visibleForTesting
+  static Future<String> Function(String imagePath) reader = _mlKitRead;
+
+  static Future<String> readText(String imagePath) => reader(imagePath);
+
+  static Future<String> _mlKitRead(String imagePath) async {
     final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
     try {
       final result = await recognizer.processImage(

@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spend_utilizer/data/store.dart';
 import 'package:spend_utilizer/main.dart';
+import 'package:spend_utilizer/models/models.dart';
+import 'package:spend_utilizer/services/chat_engine.dart';
+import 'package:spend_utilizer/services/ocr_service.dart';
+import 'package:spend_utilizer/services/share_inbox.dart';
 
 void main() {
   testWidgets('pasting a bank SMS in chat records it', (tester) async {
@@ -90,6 +94,65 @@ void main() {
     expect(store.chat, isEmpty);
     expect(store.txns.length, 1);
     expect(find.text('Track every rupee by chatting'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('items shared from other apps are handled in the chat', (
+    tester,
+  ) async {
+    final store = AppStore(storage: MemoryStorage());
+    await store.load();
+    final inbox = ShareInbox();
+    await tester.pumpWidget(SpendUtilizerApp(store: store, shares: inbox));
+    await tester.pumpAndSettle();
+
+    // Open another tab first: a share should bring the chat back.
+    await tester.tap(find.text('History'));
+    await tester.pumpAndSettle();
+
+    // A bank SMS shared from the Messages app.
+    inbox.add(
+      const SharedItem.text(
+        'Rs.250.00 debited from A/c XX1234 on 05-11-26 to VPA '
+        'swiggy@axisbank (UPI Ref No 512345678901) -SBI',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(store.txns.length, 1);
+    expect(find.textContaining('Spent ₹250'), findsOneWidget);
+    expect(inbox.hasPending, isFalse);
+
+    // A shared Google Pay receipt (the phone's text reader is replaced by
+    // the text it would return).
+    store.setOwnership(store.accounts.single, Ownership.mine);
+    OcrService.reader = (_) async => '''To Rohan Sen
+₹235
+Completed
+5 Nov 2026, 9:56 pm
+UPI transaction ID
+667512345678
+From: TEST USER (State Bank of India)
+State Bank of India ••••1234
+Google Pay''';
+    inbox.add(const SharedItem.image('/tmp/receipt.jpg'));
+    await tester.pumpAndSettle();
+    expect(find.text('📷 Shared payment receipt'), findsOneWidget);
+    expect(
+      find.textContaining('Read from a Google Pay screenshot'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text(addShotOption));
+    await tester.pumpAndSettle();
+    expect(store.txns.length, 2);
+    expect(store.txns.last.amount, 235);
+    expect(store.txns.last.source, 'screenshot');
+    expect(store.txns.last.accountId, store.accounts.single.id);
+
+    // Reading errors are reported, not swallowed.
+    OcrService.reader = (_) async => throw Exception('image unreadable');
+    inbox.add(const SharedItem.image('/tmp/broken.jpg'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining("couldn't read this image"), findsOneWidget);
     await tester.pump(const Duration(seconds: 1));
   });
 }
