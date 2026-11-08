@@ -13,9 +13,10 @@ void main() {
     expect(find.text('Track every rupee by chatting'), findsOneWidget);
 
     await tester.enterText(
-        find.byType(TextField).last,
-        'Spent Rs.1,250.50 On HDFC Bank Credit Card xx4321 At BIGBASKET '
-        'On 2026-11-04:12:30:45 Avl Lmt Rs.85,000');
+      find.byType(TextField).last,
+      'Spent Rs.1,250.50 On HDFC Bank Credit Card xx4321 At BIGBASKET '
+      'On 2026-11-04:12:30:45 Avl Lmt Rs.85,000',
+    );
     await tester.tap(find.byTooltip('Send'));
     await tester.pumpAndSettle();
 
@@ -27,10 +28,22 @@ void main() {
     await tester.tap(find.text('Debit'));
     await tester.pumpAndSettle();
     expect(find.text('How much did you spend? 💸'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, '120');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pumpAndSettle();
+    expect(find.text('When did you spend it? 📅'), findsOneWidget);
+    expect(find.text('Pick date'), findsOneWidget);
+    expect(find.text('Yesterday'), findsOneWidget);
 
     // Dashboard renders.
     await tester.tap(find.text('Dashboard'));
     await tester.pumpAndSettle();
+    expect(find.text('Total spent'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Your banks & cards'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
     expect(find.text('Your banks & cards'), findsOneWidget);
     expect(find.text('🏦 1 banks'), findsOneWidget);
     await tester.pump(const Duration(seconds: 1)); // flush save timer

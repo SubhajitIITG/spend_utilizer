@@ -27,8 +27,9 @@ class _TxnEditor extends StatefulWidget {
 
 class _TxnEditorState extends State<_TxnEditor> {
   late TxnType _type = widget.txn.type;
-  late final _amount =
-      TextEditingController(text: _fmtAmount(widget.txn.amount));
+  late final _amount = TextEditingController(
+    text: _fmtAmount(widget.txn.amount),
+  );
   late String _category = widget.txn.category;
   late String? _accountId = widget.txn.accountId;
   late final _who = TextEditingController(text: widget.txn.counterparty);
@@ -62,8 +63,8 @@ class _TxnEditorState extends State<_TxnEditor> {
         _category = t == TxnType.lend
             ? lendCategory
             : t == TxnType.borrow
-                ? borrowCategory
-                : 'Others';
+            ? borrowCategory
+            : 'Others';
       }
     });
   }
@@ -71,8 +72,8 @@ class _TxnEditorState extends State<_TxnEditor> {
   void _save() {
     final v = parseAmount(_amount.text);
     if (v == null || v <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enter a valid amount')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
       return;
     }
     final store = context.read<AppStore>();
@@ -100,16 +101,19 @@ class _TxnEditorState extends State<_TxnEditor> {
 
     return Padding(
       padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
-          left: 16,
-          right: 16),
+        bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
+        left: 16,
+        right: 16,
+      ),
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Edit transaction',
-                style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              'Edit transaction',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 12),
             SegmentedButton<TxnType>(
               segments: [
@@ -122,38 +126,47 @@ class _TxnEditorState extends State<_TxnEditor> {
             const SizedBox(height: 12),
             TextField(
               controller: _amount,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: const InputDecoration(
-                  labelText: 'Amount', prefixText: '₹ ',
-                  border: OutlineInputBorder()),
+                labelText: 'Amount',
+                prefixText: '₹ ',
+                border: OutlineInputBorder(),
+              ),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _category,
               isExpanded: true,
               decoration: const InputDecoration(
-                  labelText: 'Category', border: OutlineInputBorder()),
+                labelText: 'Category',
+                border: OutlineInputBorder(),
+              ),
               items: [
                 for (final c in _categoryChoices)
-                  DropdownMenuItem(
-                      value: c, child: Text('${emojiFor(c)} $c')),
+                  DropdownMenuItem(value: c, child: Text('${emojiFor(c)} $c')),
               ],
               onChanged: (v) => setState(() => _category = v ?? _category),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String?>(
-              initialValue:
-                  accountIds.contains(_accountId) ? _accountId : null,
+              initialValue: accountIds.contains(_accountId) ? _accountId : null,
               isExpanded: true,
               decoration: const InputDecoration(
-                  labelText: 'Account / card', border: OutlineInputBorder()),
+                labelText: 'Account / card',
+                border: OutlineInputBorder(),
+              ),
               items: [
                 const DropdownMenuItem<String?>(
-                    value: null, child: Text('— None —')),
+                  value: null,
+                  child: Text('— None —'),
+                ),
                 for (final a in store.accounts)
                   DropdownMenuItem<String?>(
-                      value: a.id, child: Text(a.displayName)),
+                    value: a.id,
+                    child: Text(a.displayName),
+                  ),
               ],
               onChanged: (v) => setState(() => _accountId = v),
             ),
@@ -169,7 +182,9 @@ class _TxnEditorState extends State<_TxnEditor> {
             TextField(
               controller: _note,
               decoration: const InputDecoration(
-                  labelText: 'Note', border: OutlineInputBorder()),
+                labelText: 'Note',
+                border: OutlineInputBorder(),
+              ),
             ),
             const SizedBox(height: 8),
             ListTile(
@@ -185,17 +200,26 @@ class _TxnEditorState extends State<_TxnEditor> {
                   lastDate: DateTime.now().add(const Duration(days: 1)),
                 );
                 if (d != null) {
-                  setState(() => _date =
-                      DateTime(d.year, d.month, d.day, _date.hour, _date.minute));
+                  setState(
+                    () => _date = DateTime(
+                      d.year,
+                      d.month,
+                      d.day,
+                      _date.hour,
+                      _date.minute,
+                    ),
+                  );
                 }
               },
             ),
             if (isDebt)
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text(_type == TxnType.lend
-                    ? 'Money returned to me'
-                    : 'I have repaid this'),
+                title: Text(
+                  _type == TxnType.lend
+                      ? 'Money returned to me'
+                      : 'I have repaid this',
+                ),
                 value: _settled,
                 onChanged: (v) => setState(() => _settled = v),
               ),
@@ -205,30 +229,36 @@ class _TxnEditorState extends State<_TxnEditor> {
                 tilePadding: EdgeInsets.zero,
                 title: const Text('Original bank message'),
                 children: [
-                  SelectableText(t.rawMessage,
-                      style: Theme.of(context).textTheme.bodySmall),
+                  SelectableText(
+                    t.rawMessage,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
               ),
             ],
             const SizedBox(height: 16),
-            Row(children: [
-              TextButton.icon(
-                style: TextButton.styleFrom(
-                    foregroundColor: Theme.of(context).colorScheme.error),
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('Delete'),
-                onPressed: () {
-                  store.deleteTxn(t);
-                  Navigator.pop(context);
-                },
-              ),
-              const Spacer(),
-              TextButton(
+            Row(
+              children: [
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  ),
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Delete'),
+                  onPressed: () {
+                    store.deleteTxn(t);
+                    Navigator.pop(context);
+                  },
+                ),
+                const Spacer(),
+                TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel')),
-              const SizedBox(width: 8),
-              FilledButton(onPressed: _save, child: const Text('Save')),
-            ]),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(onPressed: _save, child: const Text('Save')),
+              ],
+            ),
           ],
         ),
       ),

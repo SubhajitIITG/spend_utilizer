@@ -22,8 +22,10 @@ class FileStorage implements Storage {
     if (_file != null) return _file!;
     final dir = await getApplicationSupportDirectory();
     await dir.create(recursive: true);
-    return _file = File('${dir.path}${Platform.pathSeparator}'
-        'spend_utilizer_data.json');
+    return _file = File(
+      '${dir.path}${Platform.pathSeparator}'
+      'spend_utilizer_data.json',
+    );
   }
 
   @override
@@ -58,7 +60,16 @@ class SmsResult {
   final Txn? txn;
   final Account? account;
   final bool newAccount;
-  const SmsResult(this.status, {this.txn, this.account, this.newAccount = false});
+
+  /// False when the SMS had no date and today was used.
+  final bool dateFound;
+  const SmsResult(
+    this.status, {
+    this.txn,
+    this.account,
+    this.newAccount = false,
+    this.dateFound = true,
+  });
 }
 
 class CategoryTotal {
@@ -115,14 +126,26 @@ class AppStore extends ChangeNotifier {
       final raw = await storage.read();
       if (raw != null && raw.isNotEmpty) {
         final j = jsonDecode(raw) as Map<String, dynamic>;
-        accounts.addAll((j['accounts'] as List? ?? [])
-            .map((e) => Account.fromJson(e as Map<String, dynamic>)));
-        txns.addAll((j['txns'] as List? ?? [])
-            .map((e) => Txn.fromJson(e as Map<String, dynamic>)));
-        reminders.addAll((j['reminders'] as List? ?? [])
-            .map((e) => Reminder.fromJson(e as Map<String, dynamic>)));
-        chat.addAll((j['chat'] as List? ?? [])
-            .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>)));
+        accounts.addAll(
+          (j['accounts'] as List? ?? []).map(
+            (e) => Account.fromJson(e as Map<String, dynamic>),
+          ),
+        );
+        txns.addAll(
+          (j['txns'] as List? ?? []).map(
+            (e) => Txn.fromJson(e as Map<String, dynamic>),
+          ),
+        );
+        reminders.addAll(
+          (j['reminders'] as List? ?? []).map(
+            (e) => Reminder.fromJson(e as Map<String, dynamic>),
+          ),
+        );
+        chat.addAll(
+          (j['chat'] as List? ?? []).map(
+            (e) => ChatMessage.fromJson(e as Map<String, dynamic>),
+          ),
+        );
         final sync = j['sync'] as Map<String, dynamic>? ?? {};
         dirty.addAll((sync['dirty'] as List? ?? []).cast<String>());
         (sync['tombstones'] as Map<String, dynamic>? ?? {}).forEach((k, v) {
@@ -182,8 +205,9 @@ class AppStore extends ChangeNotifier {
       'chat': chat.map((c) => c.toJson()).toList(),
       'sync': {
         'dirty': dirty.toList(),
-        'tombstones':
-            tombstones.map((k, v) => MapEntry(k, v.toIso8601String())),
+        'tombstones': tombstones.map(
+          (k, v) => MapEntry(k, v.toIso8601String()),
+        ),
         'cursor': syncCursor,
         'ownerId': ownerId,
       },
@@ -225,7 +249,10 @@ class AppStore extends ChangeNotifier {
 
   /// Finds the account matching (bank, type, last4), creating it if new.
   (Account, bool) findOrCreateAccount(
-      String bank, AccountType type, String last4) {
+    String bank,
+    AccountType type,
+    String last4,
+  ) {
     final probe = Account(id: '', bank: bank, type: type, last4: last4);
     for (final a in accounts) {
       if (a.matchKey == probe.matchKey) return (a, false);
@@ -239,8 +266,7 @@ class AppStore extends ChangeNotifier {
         }
       }
     }
-    final created =
-        Account(id: newId(), bank: bank, type: type, last4: last4);
+    final created = Account(id: newId(), bank: bank, type: type, last4: last4);
     accounts.add(created);
     _touchAccount(created);
     _changed();
@@ -261,8 +287,13 @@ class AppStore extends ChangeNotifier {
     _changed();
   }
 
-  void updateAccount(Account a,
-      {String? bank, String? nickname, AccountType? type, String? last4}) {
+  void updateAccount(
+    Account a, {
+    String? bank,
+    String? nickname,
+    AccountType? type,
+    String? last4,
+  }) {
     if (bank != null) a.bank = bank.trim();
     if (nickname != null) a.nickname = nickname.trim();
     if (type != null) a.type = type;
@@ -314,8 +345,11 @@ class AppStore extends ChangeNotifier {
     final p = SmsParser.parse(raw);
     if (p == null) return const SmsResult(SmsStatus.notTransaction);
     if (_isDuplicate(p, raw)) return const SmsResult(SmsStatus.duplicate);
-    final (account, isNew) =
-        findOrCreateAccount(p.bank, p.accountType, p.last4);
+    final (account, isNew) = findOrCreateAccount(
+      p.bank,
+      p.accountType,
+      p.last4,
+    );
     final t = Txn(
       id: newId(),
       type: p.type,
@@ -331,8 +365,13 @@ class AppStore extends ChangeNotifier {
     txns.add(t);
     _touchTxn(t);
     _changed();
-    return SmsResult(SmsStatus.added,
-        txn: t, account: account, newAccount: isNew);
+    return SmsResult(
+      SmsStatus.added,
+      txn: t,
+      account: account,
+      newAccount: isNew,
+      dateFound: p.dateFound,
+    );
   }
 
   void addTxn(Txn t) {
@@ -447,10 +486,10 @@ class AppStore extends ChangeNotifier {
   }
 
   DateTime? _localUpdatedAt(SyncKind kind, String id) => switch (kind) {
-        SyncKind.account => accountById(id)?.updatedAt,
-        SyncKind.txn => txnById(id)?.updatedAt,
-        SyncKind.reminder => _reminderById(id)?.updatedAt,
-      };
+    SyncKind.account => accountById(id)?.updatedAt,
+    SyncKind.txn => txnById(id)?.updatedAt,
+    SyncKind.reminder => _reminderById(id)?.updatedAt,
+  };
 
   Reminder? _reminderById(String id) {
     for (final r in reminders) {
@@ -543,28 +582,30 @@ class AppStore extends ChangeNotifier {
   Iterable<Txn> txnsInMonth(DateTime month) =>
       txns.where((t) => _inMonth(t.date, month));
 
-  double spentIn(DateTime month) => txnsInMonth(month)
-      .where((t) => t.type == TxnType.debit)
-      .fold(0.0, (s, t) => s + t.amount);
+  double spentIn(DateTime month) =>
+      txnsInMonth(month)
+          .where((t) => t.type == TxnType.debit)
+          .fold(0.0, (s, t) => s + t.amount);
 
-  double receivedIn(DateTime month) => txnsInMonth(month)
-      .where((t) => t.type == TxnType.credit)
-      .fold(0.0, (s, t) => s + t.amount);
+  double receivedIn(DateTime month) =>
+      txnsInMonth(month)
+          .where((t) => t.type == TxnType.credit)
+          .fold(0.0, (s, t) => s + t.amount);
 
   List<CategoryTotal> categoryTotals(DateTime month, TxnType type) {
     final map = <String, double>{};
     for (final t in txnsInMonth(month).where((t) => t.type == type)) {
       map[t.category] = (map[t.category] ?? 0) + t.amount;
     }
-    final list =
-        map.entries.map((e) => CategoryTotal(e.key, e.value)).toList();
+    final list = map.entries.map((e) => CategoryTotal(e.key, e.value)).toList();
     list.sort((a, b) => b.amount.compareTo(a.amount));
     return list;
   }
 
-  double accountSpentIn(Account a, DateTime month) => txnsInMonth(month)
-      .where((t) => t.accountId == a.id && t.type == TxnType.debit)
-      .fold(0.0, (s, t) => s + t.amount);
+  double accountSpentIn(Account a, DateTime month) =>
+      txnsInMonth(month)
+          .where((t) => t.accountId == a.id && t.type == TxnType.debit)
+          .fold(0.0, (s, t) => s + t.amount);
 
   /// Outstanding lend/borrow per person (case-insensitive names).
   List<PersonBalance> personBalances() {

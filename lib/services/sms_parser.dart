@@ -18,6 +18,9 @@ class ParsedSms {
   final String counterparty;
   final String refNo;
   final DateTime date;
+
+  /// False when the message had no date and "now" was used instead.
+  final bool dateFound;
   final bool isRefund;
   final String category;
 
@@ -30,12 +33,14 @@ class ParsedSms {
     required this.counterparty,
     required this.refNo,
     required this.date,
+    this.dateFound = true,
     required this.isRefund,
     required this.category,
   });
 
   @override
-  String toString() => 'ParsedSms(${type.name} $amount $bank '
+  String toString() =>
+      'ParsedSms(${type.name} $amount $bank '
       '${accountType.name} $last4 "$counterparty" ref=$refNo $date $category)';
 }
 
@@ -77,7 +82,7 @@ class SmsParser {
     final last4 = _last4(text);
     final counterparty = _counterparty(text);
     final refNo = _refNo(text);
-    final date = _date(text, now);
+    final (date, dateFound) = _date(text, now);
 
     final category = isRefund
         ? 'Refund'
@@ -96,6 +101,7 @@ class SmsParser {
       counterparty: counterparty,
       refNo: refNo,
       date: date,
+      dateFound: dateFound,
       isRefund: isRefund,
       category: category,
     );
@@ -215,8 +221,7 @@ class SmsParser {
 
   static String _bank(String lower) {
     // Remove UPI IDs first: "abc@hdfcbank" is the payee's bank, not ours.
-    final cleaned =
-        ' ${lower.replaceAll(RegExp(r'[\w.\-]+@[\w.\-]+'), ' ')} ';
+    final cleaned = ' ${lower.replaceAll(RegExp(r'[\w.\-]+@[\w.\-]+'), ' ')} ';
     for (final entry in _banks.entries) {
       for (final alias in entry.value) {
         final re = RegExp('(?<![a-z])${RegExp.escape(alias)}');
@@ -238,8 +243,7 @@ class SmsParser {
     if (RegExp(r'\bwallet\b').hasMatch(lower)) return AccountType.wallet;
     if (RegExp(r'\bcard\b').hasMatch(lower)) {
       // A bare "card" with an available *limit* is a credit card.
-      if (RegExp(r'\b(avl\.?\s*lmt|available limit|limit)\b')
-          .hasMatch(lower)) {
+      if (RegExp(r'\b(avl\.?\s*lmt|available limit|limit)\b').hasMatch(lower)) {
         return AccountType.creditCard;
       }
       if (RegExp(r'\b(a/?c|acct|account)\b').hasMatch(lower) &&
@@ -255,13 +259,14 @@ class SmsParser {
 
   static String _last4(String text) {
     // Masked numbers: XX1234, x4321, *1234, XXXXXXXX5678, ••1234
-    final masked =
-        RegExp(r'(?<![a-wyzA-WYZ])[xX*•]+\s?(\d{3,6})\b').firstMatch(text);
+    final masked = RegExp(r'(?<![a-wyzA-WYZ])[xX*•]+\s?(\d{3,6})\b')
+        .firstMatch(text);
     if (masked != null) return _tail(masked.group(1)!);
 
-    final ending = RegExp(r'ending\s*(?:with|in)?\s*(\d{3,6})\b',
-            caseSensitive: false)
-        .firstMatch(text);
+    final ending = RegExp(
+      r'ending\s*(?:with|in)?\s*(\d{3,6})\b',
+      caseSensitive: false,
+    ).firstMatch(text);
     if (ending != null) return _tail(ending.group(1)!);
 
     final near = RegExp(
@@ -278,7 +283,8 @@ class SmsParser {
   // ---------------------------------------------------------- counterparty
 
   static final _vpa = r'([\w.\-]+@[\w.\-]+)';
-  static final _stop = r'(?=\s+(?:on|via|ref\w*|utr|rrn|txn|call|if|for|using|from|thru|through|'
+  static final _stop =
+      r'(?=\s+(?:on|via|ref\w*|utr|rrn|txn|call|if|for|using|from|thru|through|'
       r'avl|upi|dated|at|with|is|has|not)\b|[.,;(]|\s-|$)';
 
   static String _counterparty(String text) {
@@ -287,8 +293,10 @@ class SmsParser {
       RegExp('\\b(?:from|by)\\s+vpa\\s+$_vpa', caseSensitive: false),
       RegExp('\\bvpa\\s+$_vpa', caseSensitive: false),
       RegExp('\\b(?:to|from|by)\\s+$_vpa', caseSensitive: false),
-      RegExp(r';\s*([A-Za-z0-9][A-Za-z0-9 .&_-]{1,40}?)\s+credited',
-          caseSensitive: false),
+      RegExp(
+        r';\s*([A-Za-z0-9][A-Za-z0-9 .&_-]{1,40}?)\s+credited',
+        caseSensitive: false,
+      ),
       RegExp(r'UPI/(?:P2M|P2A|DR|CR)/\d+/([^/\s]+)', caseSensitive: false),
       RegExp(
         '\\b(?:at|towards|to|info:?)\\s+'
@@ -349,22 +357,41 @@ class SmsParser {
   // ------------------------------------------------------------------ date
 
   static const _months = {
-    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-    'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+    'jan': 1,
+    'feb': 2,
+    'mar': 3,
+    'apr': 4,
+    'may': 5,
+    'jun': 6,
+    'jul': 7,
+    'aug': 8,
+    'sep': 9,
+    'oct': 10,
+    'nov': 11,
+    'dec': 12,
   };
 
-  static DateTime _date(String text, DateTime now) {
+  /// Returns the transaction date/time and whether it was actually found in
+  /// the message (false = fell back to "now").
+  static (DateTime, bool) _date(String text, DateTime now) {
     DateTime? candidate;
+    var dateEnd = 0; // where the date text ends, to look for a time after it
 
     final iso = RegExp(r'\b(20\d{2})-(\d{1,2})-(\d{1,2})').firstMatch(text);
     if (iso != null) {
-      candidate = _safeDate(int.parse(iso.group(1)!),
-          int.parse(iso.group(2)!), int.parse(iso.group(3)!));
+      candidate = _safeDate(
+        int.parse(iso.group(1)!),
+        int.parse(iso.group(2)!),
+        int.parse(iso.group(3)!),
+      );
+      dateEnd = iso.end;
     }
 
+    // 05-Nov-26, 05 Nov 2026, 05Nov26, 5 November
     if (candidate == null) {
       final named = RegExp(
-        r'\b(\d{1,2})[-\s]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)'
+        r'\b(\d{1,2})(?:st|nd|rd|th)?[-\s]?'
+        r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)'
         r'[a-z]*[-\s,]*(\d{4}|\d{2})?\b',
         caseSensitive: false,
       ).firstMatch(text);
@@ -372,31 +399,93 @@ class SmsParser {
         final y = named.group(3) == null
             ? now.year
             : _year(int.parse(named.group(3)!));
-        candidate = _safeDate(y, _months[named.group(2)!.toLowerCase()]!,
-            int.parse(named.group(1)!));
+        candidate = _safeDate(
+          y,
+          _months[named.group(2)!.toLowerCase()]!,
+          int.parse(named.group(1)!),
+        );
+        dateEnd = named.end;
       }
     }
 
+    // Nov 05, 2026
+    if (candidate == null) {
+      final monthFirst = RegExp(
+        r'\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+'
+        r'(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b',
+        caseSensitive: false,
+      ).firstMatch(text);
+      if (monthFirst != null) {
+        candidate = _safeDate(
+          int.parse(monthFirst.group(3)!),
+          _months[monthFirst.group(1)!.toLowerCase()]!,
+          int.parse(monthFirst.group(2)!),
+        );
+        dateEnd = monthFirst.end;
+      }
+    }
+
+    // 05-11-26, 05/11/2026, 05.11.26
     if (candidate == null) {
       final dmy = RegExp(r'\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b')
           .firstMatch(text);
       if (dmy != null) {
-        candidate = _safeDate(_year(int.parse(dmy.group(3)!)),
-            int.parse(dmy.group(2)!), int.parse(dmy.group(1)!));
+        candidate = _safeDate(
+          _year(int.parse(dmy.group(3)!)),
+          int.parse(dmy.group(2)!),
+          int.parse(dmy.group(1)!),
+        );
+        dateEnd = dmy.end;
       }
     }
 
-    if (candidate == null) return now;
-    // Bank messages arrive soon after the transaction, so a date far in
-    // the future means we misread it.
-    if (candidate.isAfter(now.add(const Duration(days: 1)))) return now;
-    // Keep the time of day from "now" so ordering within a day is natural.
+    if (candidate == null) return (now, false);
+    // Bank messages arrive soon after the transaction, so a date in the
+    // future means we misread it.
+    if (candidate.isAfter(now.add(const Duration(days: 1)))) {
+      return (now, false);
+    }
+
+    final time = _time(text.substring(dateEnd));
+    if (time != null) {
+      return (
+        DateTime(
+          candidate.year,
+          candidate.month,
+          candidate.day,
+          time.$1,
+          time.$2,
+          time.$3,
+        ),
+        true,
+      );
+    }
+    // No time given: today → now; earlier days → midday.
     if (candidate.year == now.year &&
         candidate.month == now.month &&
         candidate.day == now.day) {
-      return now;
+      return (now, true);
     }
-    return DateTime(candidate.year, candidate.month, candidate.day, 12);
+    return (DateTime(candidate.year, candidate.month, candidate.day, 12), true);
+  }
+
+  /// Finds a time like "12:30:45", "10:15 AM" or "18:05" shortly after the
+  /// date.
+  static (int, int, int)? _time(String after) {
+    final head = after.length > 30 ? after.substring(0, 30) : after;
+    final m = RegExp(
+      r'^[^0-9]{0,8}?(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?(?![\d])',
+      caseSensitive: false,
+    ).firstMatch(head);
+    if (m == null) return null;
+    var h = int.parse(m.group(1)!);
+    final min = int.parse(m.group(2)!);
+    final sec = int.tryParse(m.group(3) ?? '') ?? 0;
+    final ampm = m.group(4)?.toLowerCase();
+    if (ampm == 'pm' && h < 12) h += 12;
+    if (ampm == 'am' && h == 12) h = 0;
+    if (h > 23 || min > 59 || sec > 59) return null;
+    return (h, min, sec);
   }
 
   static int _year(int y) => y < 100 ? 2000 + y : y;

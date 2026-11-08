@@ -70,9 +70,11 @@ class _OtpFormState extends State<OtpForm> {
         ? AuthService.looksLikeEmail(v)
         : AuthService.looksLikePhone(v);
     if (!ok) {
-      setState(() => _error = _isEmail
-          ? 'Enter a valid email address.'
-          : 'Enter a valid mobile number.');
+      setState(
+        () => _error = _isEmail
+            ? 'Enter a valid email address.'
+            : 'Enter a valid mobile number.',
+      );
       return;
     }
     await _run(() async {
@@ -99,10 +101,11 @@ class _OtpFormState extends State<OtpForm> {
         TextField(
           controller: _target,
           enabled: !_codeSent && !_busy,
-          keyboardType:
-              _isEmail ? TextInputType.emailAddress : TextInputType.phone,
+          keyboardType: _isEmail
+              ? TextInputType.emailAddress
+              : TextInputType.phone,
           autofillHints: [
-            _isEmail ? AutofillHints.email : AutofillHints.telephoneNumber
+            _isEmail ? AutofillHints.email : AutofillHints.telephoneNumber,
           ],
           decoration: InputDecoration(
             labelText: _isEmail ? 'Email address' : 'Mobile number',
@@ -118,7 +121,7 @@ class _OtpFormState extends State<OtpForm> {
             _isEmail
                 ? 'We emailed a code to ${_target.text.trim()}.'
                 : 'We sent an SMS code to '
-                    '${AuthService.normalizePhone(_target.text)}.',
+                      '${AuthService.normalizePhone(_target.text)}.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
@@ -149,7 +152,8 @@ class _OtpFormState extends State<OtpForm> {
               ? const SizedBox(
                   height: 20,
                   width: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2))
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : Text(_codeSent ? widget.verifyLabel : 'Send code'),
         ),
         if (_codeSent)
@@ -157,13 +161,15 @@ class _OtpFormState extends State<OtpForm> {
             onPressed: _busy
                 ? null
                 : () => setState(() {
-                      _codeSent = false;
-                      _code.clear();
-                      _error = null;
-                    }),
-            child: Text(_isEmail
-                ? 'Use a different email / resend'
-                : 'Use a different number / resend'),
+                    _codeSent = false;
+                    _code.clear();
+                    _error = null;
+                  }),
+            child: Text(
+              _isEmail
+                  ? 'Use a different email / resend'
+                  : 'Use a different number / resend',
+            ),
           ),
       ],
     );

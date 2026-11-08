@@ -11,6 +11,7 @@ import 'ui/accounts_screen.dart';
 import 'ui/chat_screen.dart';
 import 'ui/dashboard_screen.dart';
 import 'ui/login_screen.dart';
+import 'ui/theme.dart';
 import 'ui/transactions_screen.dart';
 
 Future<void> main() async {
@@ -77,7 +78,6 @@ class _SpendUtilizerAppState extends State<SpendUtilizerApp> {
 
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF1E6B52);
     final auth = widget.auth;
     return MultiProvider(
       providers: [
@@ -89,15 +89,8 @@ class _SpendUtilizerAppState extends State<SpendUtilizerApp> {
         title: 'Spend Utilizer',
         debugShowCheckedModeBanner: false,
         themeMode: ThemeMode.system,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: seed),
-          useMaterial3: true,
-        ),
-        darkTheme: ThemeData(
-          colorScheme:
-              ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
-          useMaterial3: true,
-        ),
+        theme: royalTheme(Brightness.light),
+        darkTheme: royalTheme(Brightness.dark),
         home: auth == null
             ? const HomeShell()
             : ListenableBuilder(
@@ -144,30 +137,29 @@ class _HomeShellState extends State<HomeShell> {
     if (wide) {
       // Desktop / tablet: side navigation rail.
       return Scaffold(
-        body: Row(children: [
-          NavigationRail(
-            selectedIndex: _index,
-            onDestinationSelected: (i) => setState(() => _index = i),
-            labelType: NavigationRailLabelType.all,
-            leading: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: CircleAvatar(
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                child: const Text('₹',
-                    style: TextStyle(color: Colors.white, fontSize: 20)),
+        body: Row(
+          children: [
+            NavigationRail(
+              selectedIndex: _index,
+              onDestinationSelected: (i) => setState(() => _index = i),
+              labelType: NavigationRailLabelType.all,
+              leading: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: RoyalEmblem(size: 44),
               ),
-            ),
-            destinations: [
-              for (final d in _destinations)
-                NavigationRailDestination(
+              destinations: [
+                for (final d in _destinations)
+                  NavigationRailDestination(
                     icon: Icon(d.$1),
                     selectedIcon: Icon(d.$2),
-                    label: Text(d.$3)),
-            ],
-          ),
-          const VerticalDivider(width: 1),
-          Expanded(child: body),
-        ]),
+                    label: Text(d.$3),
+                  ),
+              ],
+            ),
+            Container(width: 1.5, color: Royal.gold.withValues(alpha: 0.6)),
+            Expanded(child: body),
+          ],
+        ),
       );
     }
     return Scaffold(
@@ -178,7 +170,10 @@ class _HomeShellState extends State<HomeShell> {
         destinations: [
           for (final d in _destinations)
             NavigationDestination(
-                icon: Icon(d.$1), selectedIcon: Icon(d.$2), label: d.$3),
+              icon: Icon(d.$1),
+              selectedIcon: Icon(d.$2),
+              label: d.$3,
+            ),
         ],
       ),
     );

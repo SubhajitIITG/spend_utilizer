@@ -80,7 +80,9 @@ class SyncService extends ChangeNotifier {
       final pending = store.pendingRecords();
       for (var i = 0; i < pending.length; i += 500) {
         final chunk = pending.sublist(
-            i, i + 500 > pending.length ? pending.length : i + 500);
+          i,
+          i + 500 > pending.length ? pending.length : i + 500,
+        );
         await backend.upload(chunk);
         store.markUploaded(chunk);
       }

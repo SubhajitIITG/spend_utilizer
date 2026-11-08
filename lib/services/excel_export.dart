@@ -15,11 +15,11 @@ class ExportRange {
   const ExportRange(this.label, this.from);
 
   static List<ExportRange> presets(DateTime now) => [
-        ExportRange('This month', DateTime(now.year, now.month)),
-        ExportRange('Last 3 months', DateTime(now.year, now.month - 2)),
-        ExportRange('Last 12 months', DateTime(now.year, now.month - 11)),
-        const ExportRange('All time', null),
-      ];
+    ExportRange('This month', DateTime(now.year, now.month)),
+    ExportRange('Last 3 months', DateTime(now.year, now.month - 2)),
+    ExportRange('Last 12 months', DateTime(now.year, now.month - 11)),
+    const ExportRange('All time', null),
+  ];
 }
 
 class ExcelExporter {
@@ -39,9 +39,14 @@ class ExcelExporter {
     );
     for (var i = 0; i < cols.length; i++) {
       sheet
-          .cell(CellIndex.indexByColumnRow(
-              columnIndex: i, rowIndex: sheet.maxRows - 1))
-          .cellStyle = style;
+              .cell(
+                CellIndex.indexByColumnRow(
+                  columnIndex: i,
+                  rowIndex: sheet.maxRows - 1,
+                ),
+              )
+              .cellStyle =
+          style;
       sheet.setColumnWidth(i, i == 0 ? 14 : 20);
     }
   }
@@ -50,17 +55,28 @@ class ExcelExporter {
     final excel = Excel.createExcel();
     final defaultSheet = excel.getDefaultSheet() ?? 'Sheet1';
 
-    final txns = store.txns
-        .where((t) => range.from == null || !t.date.isBefore(range.from!))
-        .toList()
-      ..sort((a, b) => a.date.compareTo(b.date));
+    final txns =
+        store.txns
+            .where((t) => range.from == null || !t.date.isBefore(range.from!))
+            .toList()
+          ..sort((a, b) => a.date.compareTo(b.date));
 
     // ---- Transactions
     final tx = excel['Transactions'];
     _header(tx, [
-      'Date', 'Type', 'Amount (₹)', 'Category', 'Account', 'Bank',
-      'Account Type', 'Last 4', 'Merchant / Person', 'Note', 'Source',
-      'Ref No', 'Settled',
+      'Date',
+      'Type',
+      'Amount (₹)',
+      'Category',
+      'Account',
+      'Bank',
+      'Account Type',
+      'Last 4',
+      'Merchant / Person',
+      'Note',
+      'Source',
+      'Ref No',
+      'Settled',
     ]);
     for (final t in txns) {
       final a = store.accountById(t.accountId);
@@ -77,9 +93,11 @@ class ExcelExporter {
         _t(t.note),
         _t(t.source == 'sms' ? 'Bank SMS' : 'Manual'),
         _t(t.refNo),
-        _t(t.type == TxnType.lend || t.type == TxnType.borrow
-            ? (t.settled ? 'Yes' : 'No')
-            : ''),
+        _t(
+          t.type == TxnType.lend || t.type == TxnType.borrow
+              ? (t.settled ? 'Yes' : 'No')
+              : '',
+        ),
       ]);
     }
     final totalSpent = txns
@@ -95,8 +113,13 @@ class ExcelExporter {
 
     // ---- Monthly summary
     final monthly = excel['Monthly Summary'];
-    _header(monthly, ['Month', 'Spent (₹)', 'Received (₹)', 'Net (₹)',
-        'Transactions']);
+    _header(monthly, [
+      'Month',
+      'Spent (₹)',
+      'Received (₹)',
+      'Net (₹)',
+      'Transactions',
+    ]);
     final months = <DateTime, List<Txn>>{};
     for (final t in txns) {
       months.putIfAbsent(DateTime(t.date.year, t.date.month), () => []).add(t);
@@ -109,14 +132,23 @@ class ExcelExporter {
           .where((t) => t.type == TxnType.credit)
           .fold(0.0, (s, t) => s + t.amount);
       monthly.appendRow([
-        _t(_m.format(e.key)), _n(spent), _n(recv), _n(recv - spent),
+        _t(_m.format(e.key)),
+        _n(spent),
+        _n(recv),
+        _n(recv - spent),
         IntCellValue(e.value.length),
       ]);
     }
 
     // ---- Category summary
     final cat = excel['Category Summary'];
-    _header(cat, ['Type', 'Category', 'Total (₹)', 'Transactions', '% of type']);
+    _header(cat, [
+      'Type',
+      'Category',
+      'Total (₹)',
+      'Transactions',
+      '% of type',
+    ]);
     for (final type in [TxnType.debit, TxnType.credit]) {
       final map = <String, List<Txn>>{};
       for (final t in txns.where((t) => t.type == type)) {
@@ -139,8 +171,15 @@ class ExcelExporter {
 
     // ---- Accounts
     final acc = excel['Accounts'];
-    _header(acc, ['Name', 'Bank', 'Type', 'Last 4', 'Spent (₹)',
-        'Received (₹)', 'Transactions']);
+    _header(acc, [
+      'Name',
+      'Bank',
+      'Type',
+      'Last 4',
+      'Spent (₹)',
+      'Received (₹)',
+      'Transactions',
+    ]);
     for (final a in store.accounts) {
       final at = txns.where((t) => t.accountId == a.id).toList();
       acc.appendRow([
@@ -156,10 +195,18 @@ class ExcelExporter {
 
     // ---- Lend & borrow (all time: outstanding debts matter regardless)
     final lb = excel['Lend & Borrow'];
-    _header(lb, ['Date', 'Type', 'Person', 'Amount (₹)', 'Due date',
-        'Settled', 'Note']);
+    _header(lb, [
+      'Date',
+      'Type',
+      'Person',
+      'Amount (₹)',
+      'Due date',
+      'Settled',
+      'Note',
+    ]);
     for (final t in store.txns.where(
-        (t) => t.type == TxnType.lend || t.type == TxnType.borrow)) {
+      (t) => t.type == TxnType.lend || t.type == TxnType.borrow,
+    )) {
       lb.appendRow([
         _t(_d.format(t.date)),
         _t(t.type.label),
@@ -171,7 +218,12 @@ class ExcelExporter {
       ]);
     }
     lb.appendRow([]);
-    lb.appendRow([_t('Others owe you'), _t(''), _t(''), _n(store.totalToReceive)]);
+    lb.appendRow([
+      _t('Others owe you'),
+      _t(''),
+      _t(''),
+      _n(store.totalToReceive),
+    ]);
     lb.appendRow([_t('You owe others'), _t(''), _t(''), _n(store.totalToPay)]);
 
     // ---- Reminders

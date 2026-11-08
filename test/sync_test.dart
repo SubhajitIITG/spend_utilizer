@@ -41,9 +41,11 @@ class FakeCloud implements SyncBackend {
   }
 }
 
-const sms1 = 'Spent Rs.500 On HDFC Bank Credit Card xx1111 At SWIGGY '
+const sms1 =
+    'Spent Rs.500 On HDFC Bank Credit Card xx1111 At SWIGGY '
     'On 2026-11-04:10:00:00 Avl Lmt Rs.50,000';
-const sms2 = 'Rs.200.00 debited from A/c XX4567 on 05-11-26 to VPA '
+const sms2 =
+    'Rs.200.00 debited from A/c XX4567 on 05-11-26 to VPA '
     'blinkit@axisbank (UPI Ref No 512345678901) -SBI';
 
 Future<(AppStore, SyncService)> device(FakeCloud cloud, String user) async {
@@ -131,8 +133,7 @@ void main() {
     aSync.stop();
   });
 
-  test('data entered before first login is uploaded to the account',
-      () async {
+  test('data entered before first login is uploaded to the account', () async {
     final cloud = FakeCloud();
     final store = AppStore(storage: MemoryStorage());
     await store.load();
@@ -146,8 +147,7 @@ void main() {
     sync.stop();
   });
 
-  test('a different user signing in never sees the old user\'s data',
-      () async {
+  test('a different user signing in never sees the old user\'s data', () async {
     final cloud = FakeCloud();
     final store = AppStore(storage: MemoryStorage());
     await store.load();
@@ -166,12 +166,15 @@ void main() {
     final cloud = FakeCloud()..pageSize = 3;
     final (a, aSync) = await device(cloud, 'u1');
     for (var i = 0; i < 10; i++) {
-      a.addTxn(Txn(
+      a.addTxn(
+        Txn(
           id: 't$i',
           type: TxnType.debit,
           amount: i + 1.0,
           category: 'Others',
-          date: DateTime(2026, 11, 1)));
+          date: DateTime(2026, 11, 1),
+        ),
+      );
     }
     await aSync.syncNow();
     final (b, bSync) = await device(cloud, 'u1');
@@ -192,7 +195,10 @@ void main() {
     await s2.load();
     expect(s2.ownerId, 'u1');
     expect(s2.tombstones.length, 1);
-    expect(s2.dirty, contains(syncKey(SyncKind.account, s2.accounts.single.id)));
+    expect(
+      s2.dirty,
+      contains(syncKey(SyncKind.account, s2.accounts.single.id)),
+    );
   });
 
   test('phone numbers get the default country code', () {
@@ -205,8 +211,9 @@ void main() {
   });
 
   test('network errors are shown in plain words', () {
-    final msg = AuthService.errorText(Exception(
-        'ClientException with SocketException: Connection refused'));
+    final msg = AuthService.errorText(
+      Exception('ClientException with SocketException: Connection refused'),
+    );
     expect(msg, contains('internet connection'));
   });
 }

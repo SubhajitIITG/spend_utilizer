@@ -20,20 +20,17 @@ class SupabaseSyncBackend implements SyncBackend {
   Future<void> upload(List<SyncRecord> records) async {
     if (records.isEmpty) return;
     final uid = _userId;
-    await client.from('records').upsert(
-      [
-        for (final r in records)
-          {
-            'user_id': uid,
-            'kind': r.kind.name,
-            'id': r.id,
-            'data': r.data,
-            'deleted': r.deleted,
-            'updated_at': r.updatedAt.toUtc().toIso8601String(),
-          },
-      ],
-      onConflict: 'user_id,kind,id',
-    );
+    await client.from('records').upsert([
+      for (final r in records)
+        {
+          'user_id': uid,
+          'kind': r.kind.name,
+          'id': r.id,
+          'data': r.data,
+          'deleted': r.deleted,
+          'updated_at': r.updatedAt.toUtc().toIso8601String(),
+        },
+    ], onConflict: 'user_id,kind,id');
   }
 
   @override
@@ -52,12 +49,14 @@ class SupabaseSyncBackend implements SyncBackend {
       final (kind, _) = parseSyncKey('${row['kind']}:');
       if (kind == null) continue;
       final deleted = row['deleted'] as bool? ?? false;
-      out.add(SyncRecord(
-        kind,
-        row['id'] as String,
-        deleted ? null : (row['data'] as Map).cast<String, dynamic>(),
-        DateTime.parse(row['updated_at'] as String).toUtc(),
-      ));
+      out.add(
+        SyncRecord(
+          kind,
+          row['id'] as String,
+          deleted ? null : (row['data'] as Map).cast<String, dynamic>(),
+          DateTime.parse(row['updated_at'] as String).toUtc(),
+        ),
+      );
     }
     return FetchResult(out, last, hasMore: rows.length == _pageSize);
   }

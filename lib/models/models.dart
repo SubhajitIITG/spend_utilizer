@@ -9,11 +9,11 @@ enum AccountType { savings, creditCard, debitCard, wallet, cash }
 
 extension TxnTypeX on TxnType {
   String get label => switch (this) {
-        TxnType.debit => 'Debit',
-        TxnType.credit => 'Credit',
-        TxnType.lend => 'Lent',
-        TxnType.borrow => 'Borrowed',
-      };
+    TxnType.debit => 'Debit',
+    TxnType.credit => 'Credit',
+    TxnType.lend => 'Lent',
+    TxnType.borrow => 'Borrowed',
+  };
 
   /// True when this transaction takes money out of the user's pocket.
   bool get isOutflow => this == TxnType.debit || this == TxnType.lend;
@@ -21,12 +21,12 @@ extension TxnTypeX on TxnType {
 
 extension AccountTypeX on AccountType {
   String get label => switch (this) {
-        AccountType.savings => 'Bank Account',
-        AccountType.creditCard => 'Credit Card',
-        AccountType.debitCard => 'Debit Card',
-        AccountType.wallet => 'Wallet',
-        AccountType.cash => 'Cash',
-      };
+    AccountType.savings => 'Bank Account',
+    AccountType.creditCard => 'Credit Card',
+    AccountType.debitCard => 'Debit Card',
+    AccountType.wallet => 'Wallet',
+    AccountType.cash => 'Cash',
+  };
 
   bool get isCard =>
       this == AccountType.creditCard || this == AccountType.debitCard;
@@ -79,22 +79,22 @@ class Account {
       '${bank.toLowerCase()}|${type.name}|${last4.toLowerCase()}';
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'bank': bank,
-        'type': type.name,
-        'last4': last4,
-        'nickname': nickname,
-        'updatedAt': updatedAt.toIso8601String(),
-      };
+    'id': id,
+    'bank': bank,
+    'type': type.name,
+    'last4': last4,
+    'nickname': nickname,
+    'updatedAt': updatedAt.toIso8601String(),
+  };
 
   factory Account.fromJson(Map<String, dynamic> j) => Account(
-        id: j['id'] as String,
-        bank: j['bank'] as String? ?? 'Unknown',
-        type: _enumByName(AccountType.values, j['type'], AccountType.savings),
-        last4: j['last4'] as String? ?? '',
-        nickname: j['nickname'] as String? ?? '',
-        updatedAt: _parseUpdated(j['updatedAt']),
-      );
+    id: j['id'] as String,
+    bank: j['bank'] as String? ?? 'Unknown',
+    type: _enumByName(AccountType.values, j['type'], AccountType.savings),
+    last4: j['last4'] as String? ?? '',
+    nickname: j['nickname'] as String? ?? '',
+    updatedAt: _parseUpdated(j['updatedAt']),
+  );
 }
 
 class Txn {
@@ -137,38 +137,38 @@ class Txn {
   }) : updatedAt = updatedAt ?? DateTime.now().toUtc();
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'type': type.name,
-        'amount': amount,
-        'category': category,
-        'accountId': accountId,
-        'counterparty': counterparty,
-        'note': note,
-        'date': date.toIso8601String(),
-        'source': source,
-        'rawMessage': rawMessage,
-        'refNo': refNo,
-        'settled': settled,
-        'dueDate': dueDate?.toIso8601String(),
-        'updatedAt': updatedAt.toIso8601String(),
-      };
+    'id': id,
+    'type': type.name,
+    'amount': amount,
+    'category': category,
+    'accountId': accountId,
+    'counterparty': counterparty,
+    'note': note,
+    'date': date.toIso8601String(),
+    'source': source,
+    'rawMessage': rawMessage,
+    'refNo': refNo,
+    'settled': settled,
+    'dueDate': dueDate?.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+  };
 
   factory Txn.fromJson(Map<String, dynamic> j) => Txn(
-        id: j['id'] as String,
-        type: _enumByName(TxnType.values, j['type'], TxnType.debit),
-        amount: (j['amount'] as num).toDouble(),
-        category: j['category'] as String? ?? 'Others',
-        accountId: j['accountId'] as String?,
-        counterparty: j['counterparty'] as String? ?? '',
-        note: j['note'] as String? ?? '',
-        date: DateTime.tryParse(j['date'] as String? ?? '') ?? DateTime.now(),
-        source: j['source'] as String? ?? 'manual',
-        rawMessage: j['rawMessage'] as String? ?? '',
-        refNo: j['refNo'] as String? ?? '',
-        settled: j['settled'] as bool? ?? false,
-        dueDate: DateTime.tryParse(j['dueDate'] as String? ?? ''),
-        updatedAt: _parseUpdated(j['updatedAt']),
-      );
+    id: j['id'] as String,
+    type: _enumByName(TxnType.values, j['type'], TxnType.debit),
+    amount: (j['amount'] as num).toDouble(),
+    category: j['category'] as String? ?? 'Others',
+    accountId: j['accountId'] as String?,
+    counterparty: j['counterparty'] as String? ?? '',
+    note: j['note'] as String? ?? '',
+    date: DateTime.tryParse(j['date'] as String? ?? '') ?? DateTime.now(),
+    source: j['source'] as String? ?? 'manual',
+    rawMessage: j['rawMessage'] as String? ?? '',
+    refNo: j['refNo'] as String? ?? '',
+    settled: j['settled'] as bool? ?? false,
+    dueDate: DateTime.tryParse(j['dueDate'] as String? ?? ''),
+    updatedAt: _parseUpdated(j['updatedAt']),
+  );
 }
 
 class Reminder {
@@ -193,25 +193,24 @@ class Reminder {
   }) : updatedAt = updatedAt ?? DateTime.now().toUtc();
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'amount': amount,
-        'dueDate': dueDate.toIso8601String(),
-        'done': done,
-        'txnId': txnId,
-        'updatedAt': updatedAt.toIso8601String(),
-      };
+    'id': id,
+    'title': title,
+    'amount': amount,
+    'dueDate': dueDate.toIso8601String(),
+    'done': done,
+    'txnId': txnId,
+    'updatedAt': updatedAt.toIso8601String(),
+  };
 
   factory Reminder.fromJson(Map<String, dynamic> j) => Reminder(
-        id: j['id'] as String,
-        title: j['title'] as String? ?? '',
-        amount: (j['amount'] as num?)?.toDouble(),
-        dueDate:
-            DateTime.tryParse(j['dueDate'] as String? ?? '') ?? DateTime.now(),
-        done: j['done'] as bool? ?? false,
-        txnId: j['txnId'] as String?,
-        updatedAt: _parseUpdated(j['updatedAt']),
-      );
+    id: j['id'] as String,
+    title: j['title'] as String? ?? '',
+    amount: (j['amount'] as num?)?.toDouble(),
+    dueDate: DateTime.tryParse(j['dueDate'] as String? ?? '') ?? DateTime.now(),
+    done: j['done'] as bool? ?? false,
+    txnId: j['txnId'] as String?,
+    updatedAt: _parseUpdated(j['updatedAt']),
+  );
 }
 
 /// One bubble in the chat. Bot messages may reference a transaction so the
@@ -232,18 +231,18 @@ class ChatMessage {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'fromUser': fromUser,
-        'text': text,
-        'time': time.toIso8601String(),
-        'txnId': txnId,
-      };
+    'id': id,
+    'fromUser': fromUser,
+    'text': text,
+    'time': time.toIso8601String(),
+    'txnId': txnId,
+  };
 
   factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
-        id: j['id'] as String,
-        fromUser: j['fromUser'] as bool? ?? false,
-        text: j['text'] as String? ?? '',
-        time: DateTime.tryParse(j['time'] as String? ?? '') ?? DateTime.now(),
-        txnId: j['txnId'] as String?,
-      );
+    id: j['id'] as String,
+    fromUser: j['fromUser'] as bool? ?? false,
+    text: j['text'] as String? ?? '',
+    time: DateTime.tryParse(j['time'] as String? ?? '') ?? DateTime.now(),
+    txnId: j['txnId'] as String?,
+  );
 }

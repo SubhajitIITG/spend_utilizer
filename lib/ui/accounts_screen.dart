@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../data/store.dart';
 import '../models/models.dart';
 import '../util/format.dart';
+import 'theme.dart';
 
 class AccountsScreen extends StatelessWidget {
   const AccountsScreen({super.key});
@@ -18,7 +19,7 @@ class AccountsScreen extends StatelessWidget {
     final now = DateTime.now();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Banks & Cards')),
+      appBar: royalAppBar('Banks & Cards'),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _editAccount(context, null),
         icon: const Icon(Icons.add),
@@ -43,35 +44,59 @@ class AccountsScreen extends StatelessWidget {
                   children: [
                     for (final e in byBank.entries)
                       Card(
-                        child: Column(children: [
-                          ListTile(
-                            title: Text(e.key,
-                                style: Theme.of(context).textTheme.titleMedium),
-                            subtitle: Text(_bankSummary(e.value)),
-                            trailing: e.key == 'Cash'
-                                ? null
-                                : IconButton(
-                                    tooltip: 'Rename bank',
-                                    icon: const Icon(Icons.edit_outlined),
-                                    onPressed: () =>
-                                        _renameBank(context, e.key),
-                                  ),
-                          ),
-                          const Divider(height: 1),
-                          for (final a in e.value)
+                        margin: const EdgeInsets.only(bottom: 14),
+                        child: Column(
+                          children: [
                             ListTile(
-                              leading: Icon(_iconFor(a.type)),
-                              title: Text(a.displayName),
-                              subtitle: Text(
-                                '${a.type.label}'
-                                '${a.last4.isEmpty ? '' : ' ••${a.last4}'}'
-                                ' · ${money(store.accountSpentIn(a, now))} '
-                                'spent this month',
+                              leading: Container(
+                                width: 40,
+                                height: 40,
+                                alignment: Alignment.center,
+                                decoration: const BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: Royal.gradient,
+                                ),
+                                child: Text(
+                                  e.key.isEmpty ? '?' : e.key[0].toUpperCase(),
+                                  style: const TextStyle(
+                                    color: Royal.goldLight,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
                               ),
-                              trailing: const Icon(Icons.chevron_right),
-                              onTap: () => _editAccount(context, a),
+                              title: Text(
+                                e.key,
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              subtitle: Text(_bankSummary(e.value)),
+                              trailing: e.key == 'Cash'
+                                  ? null
+                                  : IconButton(
+                                      tooltip: 'Rename bank',
+                                      icon: const Icon(Icons.edit_outlined),
+                                      onPressed: () =>
+                                          _renameBank(context, e.key),
+                                    ),
                             ),
-                        ]),
+                            const Divider(height: 1),
+                            for (final a in e.value)
+                              ListTile(
+                                leading: Icon(
+                                  _iconFor(a.type),
+                                  color: Royal.gold,
+                                ),
+                                title: Text(a.displayName),
+                                subtitle: Text(
+                                  '${a.type.label}'
+                                  '${a.last4.isEmpty ? '' : ' ••${a.last4}'}'
+                                  ' · ${money(store.accountSpentIn(a, now))} '
+                                  'spent this month',
+                                ),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => _editAccount(context, a),
+                              ),
+                          ],
+                        ),
                       ),
                   ],
                 ),
@@ -103,11 +128,13 @@ class AccountsScreen extends StatelessWidget {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(ctx, c.text),
-              child: const Text('Save')),
+            onPressed: () => Navigator.pop(ctx, c.text),
+            child: const Text('Save'),
+          ),
         ],
       ),
     );
@@ -129,50 +156,58 @@ class AccountsScreen extends StatelessWidget {
         builder: (ctx, setState) => AlertDialog(
           title: Text(existing == null ? 'Add account' : 'Edit account'),
           content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(
-                controller: nick,
-                decoration: const InputDecoration(
-                  labelText: 'Name',
-                  hintText: 'e.g. HDFC Millennia, Salary account',
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nick,
+                  decoration: const InputDecoration(
+                    labelText: 'Name',
+                    hintText: 'e.g. HDFC Millennia, Salary account',
+                  ),
                 ),
-              ),
-              TextField(
-                controller: bank,
-                decoration: const InputDecoration(labelText: 'Bank'),
-              ),
-              DropdownButtonFormField<AccountType>(
-                initialValue: type,
-                decoration: const InputDecoration(labelText: 'Type'),
-                items: [
-                  for (final t in AccountType.values)
-                    DropdownMenuItem(value: t, child: Text(t.label)),
-                ],
-                onChanged: (v) => setState(() => type = v ?? type),
-              ),
-              TextField(
-                controller: last4,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                decoration: const InputDecoration(
-                    labelText: 'Last 4 digits', counterText: ''),
-              ),
-            ]),
+                TextField(
+                  controller: bank,
+                  decoration: const InputDecoration(labelText: 'Bank'),
+                ),
+                DropdownButtonFormField<AccountType>(
+                  initialValue: type,
+                  decoration: const InputDecoration(labelText: 'Type'),
+                  items: [
+                    for (final t in AccountType.values)
+                      DropdownMenuItem(value: t, child: Text(t.label)),
+                  ],
+                  onChanged: (v) => setState(() => type = v ?? type),
+                ),
+                TextField(
+                  controller: last4,
+                  keyboardType: TextInputType.number,
+                  maxLength: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Last 4 digits',
+                    counterText: '',
+                  ),
+                ),
+              ],
+            ),
           ),
           actions: [
             if (existing != null)
               TextButton(
                 style: TextButton.styleFrom(
-                    foregroundColor: Theme.of(ctx).colorScheme.error),
+                  foregroundColor: Theme.of(ctx).colorScheme.error,
+                ),
                 onPressed: () => Navigator.pop(ctx, 'delete'),
                 child: const Text('Delete'),
               ),
             TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel')),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
             FilledButton(
-                onPressed: () => Navigator.pop(ctx, 'save'),
-                child: const Text('Save')),
+              onPressed: () => Navigator.pop(ctx, 'save'),
+              child: const Text('Save'),
+            ),
           ],
         ),
       ),
@@ -185,28 +220,32 @@ class AccountsScreen extends StatelessWidget {
           ? (type == AccountType.cash ? 'Cash' : 'Unknown Bank')
           : bank.text.trim();
       if (existing == null) {
-        store.addAccount(Account(
-          id: store.newId(),
-          bank: bankName,
-          type: type,
-          last4: last4.text.trim(),
-          nickname: nick.text.trim(),
-        ));
-      } else {
-        store.updateAccount(existing,
+        store.addAccount(
+          Account(
+            id: store.newId(),
             bank: bankName,
-            nickname: nick.text,
             type: type,
-            last4: last4.text);
+            last4: last4.text.trim(),
+            nickname: nick.text.trim(),
+          ),
+        );
+      } else {
+        store.updateAccount(
+          existing,
+          bank: bankName,
+          nickname: nick.text,
+          type: type,
+          last4: last4.text,
+        );
       }
     }
   }
 }
 
 IconData _iconFor(AccountType t) => switch (t) {
-      AccountType.creditCard => Icons.credit_card,
-      AccountType.debitCard => Icons.payment,
-      AccountType.savings => Icons.account_balance,
-      AccountType.wallet => Icons.account_balance_wallet,
-      AccountType.cash => Icons.payments_outlined,
-    };
+  AccountType.creditCard => Icons.credit_card,
+  AccountType.debitCard => Icons.payment,
+  AccountType.savings => Icons.account_balance,
+  AccountType.wallet => Icons.account_balance_wallet,
+  AccountType.cash => Icons.payments_outlined,
+};

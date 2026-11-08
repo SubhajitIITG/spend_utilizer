@@ -4,14 +4,19 @@ import 'package:spend_utilizer/data/store.dart';
 import 'package:spend_utilizer/models/models.dart';
 import 'package:spend_utilizer/services/chat_engine.dart';
 import 'package:spend_utilizer/services/excel_export.dart';
+import 'package:spend_utilizer/util/format.dart';
 
-const hdfcCard1 = 'Spent Rs.500 On HDFC Bank Credit Card xx1111 At SWIGGY '
+const hdfcCard1 =
+    'Spent Rs.500 On HDFC Bank Credit Card xx1111 At SWIGGY '
     'On 2026-11-04:10:00:00 Avl Lmt Rs.50,000';
-const hdfcCard2 = 'Spent Rs.900 On HDFC Bank Credit Card xx2222 At AMAZON '
+const hdfcCard2 =
+    'Spent Rs.900 On HDFC Bank Credit Card xx2222 At AMAZON '
     'On 2026-11-04:11:00:00 Avl Lmt Rs.90,000';
-const hdfcCard3 = 'Spent Rs.300 On HDFC Bank Credit Card xx3333 At UBER '
+const hdfcCard3 =
+    'Spent Rs.300 On HDFC Bank Credit Card xx3333 At UBER '
     'On 2026-11-04:12:00:00 Avl Lmt Rs.30,000';
-const sbiSavings = 'Rs.200.00 debited from A/c XX4567 on 05-11-26 to VPA '
+const sbiSavings =
+    'Rs.200.00 debited from A/c XX4567 on 05-11-26 to VPA '
     'blinkit@axisbank (UPI Ref No 512345678901) -SBI';
 
 Future<AppStore> newStore() async {
@@ -70,6 +75,10 @@ void main() {
     expect(e.inputKind, InputKind.amount);
     expect(e.handle('abc').single.text, contains('valid amount'));
     e.handle('1,250');
+    expect(e.inputKind, InputKind.date);
+    expect(e.handle('25-12-2099').single.text, contains('future'));
+    expect(e.handle('31-02-2026').single.text, contains('couldn'));
+    e.handle('3-11-2026');
     expect(e.options, contains('🛒 Groceries'));
     e.handle('🛒 Groceries');
     expect(e.options, contains('SBI Bank Account ••4567'));
@@ -81,6 +90,7 @@ void main() {
     expect(t.amount, 1250);
     expect(t.category, 'Groceries');
     expect(t.accountId, s.accounts.first.id);
+    expect(t.date, DateTime(2026, 11, 3, 12));
   });
 
   test('credit flow offers refund category', () async {
@@ -88,12 +98,15 @@ void main() {
     final e = ChatEngine(s);
     e.start(ChatFlow.credit);
     e.handle('499');
+    e.handle('Yesterday');
     expect(e.options, contains('↩️ Refund'));
     e.handle('↩️ Refund');
     e.handle('Cash');
     final done = e.handle('Skip');
     final t = s.txnById(done.single.txnId)!;
     expect(t.category, 'Refund');
+    final y = DateTime.now().subtract(const Duration(days: 1));
+    expect([t.date.year, t.date.month, t.date.day], [y.year, y.month, y.day]);
     expect(s.accountById(t.accountId)!.type, AccountType.cash);
   });
 
@@ -103,12 +116,14 @@ void main() {
     e.start(ChatFlow.lend);
     e.handle('Rahul');
     e.handle('2000');
+    e.handle('Today');
     e.handle('Skip');
     e.handle('In 1 week');
     e.handle('Skip');
     e.start(ChatFlow.borrow);
     e.handle('Priya');
     e.handle('500');
+    e.handle('5 Nov');
     e.handle('Skip');
     e.handle('No reminder');
     e.handle('Skip');
@@ -116,6 +131,8 @@ void main() {
     expect(s.totalToReceive, 2000);
     expect(s.totalToPay, 500);
     expect(s.reminders.single.title, contains('Rahul'));
+    final borrow = s.txns.firstWhere((t) => t.type == TxnType.borrow);
+    expect([borrow.date.month, borrow.date.day], [11, 5]);
 
     final lend = s.txns.firstWhere((t) => t.type == TxnType.lend);
     s.setSettled(lend, true);
@@ -141,6 +158,26 @@ void main() {
     expect(replies.last.text, contains('1 not understood'));
   });
 
+  test('SMS without a date says today was used', () async {
+    final s = await newStore();
+    final e = ChatEngine(s);
+    final r = e.handle('Rs 75 debited from A/c XX1234 to VPA chai@ybl');
+    expect(r.single.text, contains('No date in the message'));
+    expect(r.single.text, contains('📅'));
+  });
+
+  test('typed dates are understood', () {
+    final now = DateTime(2026, 11, 8);
+    expect(parseUserDate('5-11-2026', now: now), DateTime(2026, 11, 5));
+    expect(parseUserDate('5/11', now: now), DateTime(2026, 11, 5));
+    expect(parseUserDate('5 nov', now: now), DateTime(2026, 11, 5));
+    expect(parseUserDate('5th November 26', now: now), DateTime(2026, 11, 5));
+    expect(parseUserDate('yesterday', now: now), DateTime(2026, 11, 7));
+    expect(parseUserDate('2026-11-01', now: now), DateTime(2026, 11, 1));
+    expect(parseUserDate('31-02-2026', now: now), isNull);
+    expect(parseUserDate('hello', now: now), isNull);
+  });
+
   test('excel export has all sheets and rows', () async {
     final s = await newStore();
     s.addFromSms(hdfcCard1);
@@ -148,11 +185,16 @@ void main() {
     final bytes = ExcelExporter.build(s, const ExportRange('All time', null));
     final x = Excel.decodeBytes(bytes);
     expect(
-        x.tables.keys,
-        containsAll([
-          'Transactions', 'Monthly Summary', 'Category Summary', 'Accounts',
-          'Lend & Borrow', 'Reminders',
-        ]));
+      x.tables.keys,
+      containsAll([
+        'Transactions',
+        'Monthly Summary',
+        'Category Summary',
+        'Accounts',
+        'Lend & Borrow',
+        'Reminders',
+      ]),
+    );
     expect(x.tables.keys, isNot(contains('Sheet1')));
     final rows = x.tables['Transactions']!.rows;
     expect(rows.first.first!.value.toString(), 'Date');

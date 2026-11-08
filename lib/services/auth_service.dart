@@ -50,13 +50,19 @@ class AuthService extends ChangeNotifier {
       _auth.signInWithOtp(email: email.trim(), shouldCreateUser: true);
 
   Future<void> verifyEmailCode(String email, String code) => _auth.verifyOTP(
-      email: email.trim(), token: code.trim(), type: OtpType.email);
+    email: email.trim(),
+    token: code.trim(),
+    type: OtpType.email,
+  );
 
   Future<void> sendPhoneCode(String phone) =>
       _auth.signInWithOtp(phone: normalizePhone(phone));
 
   Future<void> verifyPhoneCode(String phone, String code) => _auth.verifyOTP(
-      phone: normalizePhone(phone), token: code.trim(), type: OtpType.sms);
+    phone: normalizePhone(phone),
+    token: code.trim(),
+    type: OtpType.sms,
+  );
 
   Future<void> signInAsGuest() => _auth.signInAnonymously();
 
@@ -66,24 +72,29 @@ class AuthService extends ChangeNotifier {
       _auth.updateUser(UserAttributes(email: email.trim()));
 
   Future<void> verifyLinkEmail(String email, String code) => _auth.verifyOTP(
-      email: email.trim(), token: code.trim(), type: OtpType.emailChange);
+    email: email.trim(),
+    token: code.trim(),
+    type: OtpType.emailChange,
+  );
 
   Future<void> linkPhone(String phone) =>
       _auth.updateUser(UserAttributes(phone: normalizePhone(phone)));
 
   Future<void> verifyLinkPhone(String phone, String code) => _auth.verifyOTP(
-      phone: normalizePhone(phone),
-      token: code.trim(),
-      type: OtpType.phoneChange);
+    phone: normalizePhone(phone),
+    token: code.trim(),
+    type: OtpType.phoneChange,
+  );
 
   Future<void> signOut() => _auth.signOut();
 
   /// Human-friendly error text.
   static String errorText(Object e) {
     final raw = e is AuthException ? e.message : e.toString();
-    if (RegExp(r'SocketException|ClientException|Failed host lookup|'
-            r'Connection (refused|reset|timed out)|Network is unreachable')
-        .hasMatch(raw)) {
+    if (RegExp(
+      r'SocketException|ClientException|Failed host lookup|'
+      r'Connection (refused|reset|timed out)|Network is unreachable',
+    ).hasMatch(raw)) {
       return 'Can\'t reach the server. Check your internet connection and '
           'try again.';
     }

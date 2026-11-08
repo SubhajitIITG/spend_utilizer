@@ -18,24 +18,34 @@ enum InputKind { text, amount, date }
 
 extension ChatFlowX on ChatFlow {
   String get label => switch (this) {
-        ChatFlow.none => 'Paste SMS',
-        ChatFlow.debit => 'Debit',
-        ChatFlow.credit => 'Credit',
-        ChatFlow.lend => 'Lend',
-        ChatFlow.borrow => 'Borrow',
-        ChatFlow.reminder => 'Reminder',
-      };
+    ChatFlow.none => 'Paste SMS',
+    ChatFlow.debit => 'Debit',
+    ChatFlow.credit => 'Credit',
+    ChatFlow.lend => 'Lend',
+    ChatFlow.borrow => 'Borrow',
+    ChatFlow.reminder => 'Reminder',
+  };
   String get emoji => switch (this) {
-        ChatFlow.none => '📋',
-        ChatFlow.debit => '➖',
-        ChatFlow.credit => '➕',
-        ChatFlow.lend => '🤝',
-        ChatFlow.borrow => '🙏',
-        ChatFlow.reminder => '⏰',
-      };
+    ChatFlow.none => '📋',
+    ChatFlow.debit => '➖',
+    ChatFlow.credit => '➕',
+    ChatFlow.lend => '🤝',
+    ChatFlow.borrow => '🙏',
+    ChatFlow.reminder => '⏰',
+  };
 }
 
-enum _Step { amount, category, account, person, dueDate, note, title, done }
+enum _Step {
+  amount,
+  txnDate,
+  category,
+  account,
+  person,
+  dueDate,
+  note,
+  title,
+  done,
+}
 
 const cancelOption = 'Cancel';
 const skipOption = 'Skip';
@@ -57,17 +67,22 @@ class ChatEngine {
   String _note = '';
   String _title = '';
   DateTime? _due;
+  DateTime? _when;
 
   /// Maps the account option labels shown to the user to account ids.
   final Map<String, String> _accountOptions = {};
 
   bool get active => flow != ChatFlow.none;
 
+  /// True when asking when a transaction happened (date must be in the
+  /// past), false for due dates / reminders (future).
+  bool get askingPastDate => _step == _Step.txnDate;
+
   InputKind get inputKind => switch (_step) {
-        _Step.amount => InputKind.amount,
-        _Step.dueDate => InputKind.date,
-        _ => InputKind.text,
-      };
+    _Step.amount => InputKind.amount,
+    _Step.dueDate || _Step.txnDate => InputKind.date,
+    _ => InputKind.text,
+  };
 
   String get inputHint {
     if (!active) return 'Paste bank message(s) here…';
@@ -77,6 +92,7 @@ class ChatEngine {
       _Step.account => 'Pick an account',
       _Step.person => 'Enter name',
       _Step.dueDate => 'dd-mm-yyyy or pick an option',
+      _Step.txnDate => 'e.g. 5-11-2026, 5 Nov, yesterday',
       _Step.note => 'Add a note (optional)',
       _Step.title => 'What should I remind you about?',
       _Step.done => '',
@@ -87,15 +103,16 @@ class ChatEngine {
   List<String> get options {
     if (!active) return const [];
     final List<String> opts = switch (_step) {
-      _Step.category => (flow == ChatFlow.credit
-              ? creditCategories
-              : debitCategories)
-          .map((c) => '${c.emoji} ${c.name}')
-          .toList(),
+      _Step.category =>
+        (flow == ChatFlow.credit ? creditCategories : debitCategories)
+            .map((c) => '${c.emoji} ${c.name}')
+            .toList(),
       _Step.account => [..._accountOptions.keys, skipOption],
-      _Step.dueDate => flow == ChatFlow.reminder
-          ? ['Tomorrow', 'In 1 week', 'In 1 month']
-          : ['In 1 week', 'In 1 month', 'No reminder'],
+      _Step.dueDate =>
+        flow == ChatFlow.reminder
+            ? ['Tomorrow', 'In 1 week', 'In 1 month']
+            : ['In 1 week', 'In 1 month', 'No reminder'],
+      _Step.txnDate => ['Today', 'Yesterday', '2 days ago'],
       _Step.note => [skipOption],
       _Step.person => _knownPeople(),
       _ => <String>[],
@@ -122,10 +139,36 @@ class ChatEngine {
     _reset();
     flow = f;
     _steps = switch (f) {
-      ChatFlow.debit => [_Step.amount, _Step.category, _Step.account, _Step.note],
-      ChatFlow.credit => [_Step.amount, _Step.category, _Step.account, _Step.note],
-      ChatFlow.lend => [_Step.person, _Step.amount, _Step.account, _Step.dueDate, _Step.note],
-      ChatFlow.borrow => [_Step.person, _Step.amount, _Step.account, _Step.dueDate, _Step.note],
+      ChatFlow.debit => [
+        _Step.amount,
+        _Step.txnDate,
+        _Step.category,
+        _Step.account,
+        _Step.note,
+      ],
+      ChatFlow.credit => [
+        _Step.amount,
+        _Step.txnDate,
+        _Step.category,
+        _Step.account,
+        _Step.note,
+      ],
+      ChatFlow.lend => [
+        _Step.person,
+        _Step.amount,
+        _Step.txnDate,
+        _Step.account,
+        _Step.dueDate,
+        _Step.note,
+      ],
+      ChatFlow.borrow => [
+        _Step.person,
+        _Step.amount,
+        _Step.txnDate,
+        _Step.account,
+        _Step.dueDate,
+        _Step.note,
+      ],
       ChatFlow.reminder => [_Step.title, _Step.amount, _Step.dueDate],
       ChatFlow.none => [],
     };
@@ -168,16 +211,17 @@ class ChatEngine {
     _note = '';
     _title = '';
     _due = null;
+    _when = null;
     _accountOptions.clear();
   }
 
   ChatMessage _bot(String text, {String? txnId}) => ChatMessage(
-        id: store.newId(),
-        fromUser: false,
-        text: text,
-        time: DateTime.now(),
-        txnId: txnId,
-      );
+    id: store.newId(),
+    fromUser: false,
+    text: text,
+    time: DateTime.now(),
+    txnId: txnId,
+  );
 
   String _question() {
     switch (_step) {
@@ -189,6 +233,13 @@ class ChatEngine {
           ChatFlow.borrow => 'How much did you borrow from $_person?',
           ChatFlow.reminder => 'Amount involved? (tap Skip if none)',
           ChatFlow.none => '',
+        };
+      case _Step.txnDate:
+        return switch (flow) {
+          ChatFlow.credit => 'When did you receive it? 📅',
+          ChatFlow.lend => 'When did you lend it? 📅',
+          ChatFlow.borrow => 'When did you borrow it? 📅',
+          _ => 'When did you spend it? 📅',
         };
       case _Step.category:
         return flow == ChatFlow.credit
@@ -209,8 +260,8 @@ class ChatEngine {
         return flow == ChatFlow.reminder
             ? 'When should I remind you?'
             : flow == ChatFlow.lend
-                ? 'When should $_person return it? I\'ll remind you.'
-                : 'When do you need to repay $_person? I\'ll remind you.';
+            ? 'When should $_person return it? I\'ll remind you.'
+            : 'When do you need to repay $_person? I\'ll remind you.';
       case _Step.note:
         return 'Any note? (optional)';
       case _Step.title:
@@ -243,7 +294,9 @@ class ChatEngine {
         return null;
       case _Step.category:
         // Accept "🛒 Groceries" chips or typed names.
-        final all = flow == ChatFlow.credit ? creditCategories : debitCategories;
+        final all = flow == ChatFlow.credit
+            ? creditCategories
+            : debitCategories;
         for (final c in all) {
           if (text == '${c.emoji} ${c.name}' ||
               text.toLowerCase() == c.name.toLowerCase()) {
@@ -284,6 +337,22 @@ class ChatEngine {
         }
         _due = DateTime(d.year, d.month, d.day, 9);
         return null;
+      case _Step.txnDate:
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+        final d = text == '2 days ago'
+            ? today.subtract(const Duration(days: 2))
+            : parseUserDate(text);
+        if (d == null) {
+          return 'I couldn\'t read that date. Try 5-11-2026, 5 Nov or '
+              'yesterday, or tap Pick date.';
+        }
+        if (d.isAfter(today)) {
+          return 'That date is in the future. When did it actually happen?';
+        }
+        // Today keeps the current time; earlier days get no specific time.
+        _when = d == today ? now : DateTime(d.year, d.month, d.day, 12);
+        return null;
       case _Step.note:
         _note = text == skipOption ? '' : text;
         return null;
@@ -300,15 +369,21 @@ class ChatEngine {
     final out = <ChatMessage>[];
     if (f == ChatFlow.reminder) {
       final due = _due ?? DateTime.now().add(const Duration(days: 1));
-      store.addReminder(Reminder(
-        id: store.newId(),
-        title: _title,
-        amount: _amount,
-        dueDate: due,
-      ));
-      out.add(_bot('⏰ Reminder set: "$_title"'
+      store.addReminder(
+        Reminder(
+          id: store.newId(),
+          title: _title,
+          amount: _amount,
+          dueDate: due,
+        ),
+      );
+      out.add(
+        _bot(
+          '⏰ Reminder set: "$_title"'
           '${_amount != null ? ' (${money(_amount!)})' : ''} on '
-          '${formatDate(due)}.'));
+          '${formatDate(due)}.',
+        ),
+      );
       _reset();
       return out;
     }
@@ -331,21 +406,23 @@ class ChatEngine {
       accountId: _accountId,
       counterparty: _person,
       note: _note,
-      date: DateTime.now(),
+      date: _when ?? DateTime.now(),
       dueDate: _due,
     );
     store.addTxn(t);
 
     if (_due != null && (type == TxnType.lend || type == TxnType.borrow)) {
-      store.addReminder(Reminder(
-        id: store.newId(),
-        title: type == TxnType.lend
-            ? 'Collect ${money(t.amount)} from $_person'
-            : 'Repay ${money(t.amount)} to $_person',
-        amount: t.amount,
-        dueDate: _due!,
-        txnId: t.id,
-      ));
+      store.addReminder(
+        Reminder(
+          id: store.newId(),
+          title: type == TxnType.lend
+              ? 'Collect ${money(t.amount)} from $_person'
+              : 'Repay ${money(t.amount)} to $_person',
+          amount: t.amount,
+          dueDate: _due!,
+          txnId: t.id,
+        ),
+      );
     }
     out.add(_bot(describeTxn(store, t), txnId: t.id));
     _reset();
@@ -362,8 +439,14 @@ class ChatEngine {
         case SmsStatus.added:
           added++;
           var msg = describeTxn(store, r.txn!);
+          if (!r.dateFound) {
+            msg +=
+                '\n📅 No date in the message, so I used today. Tap '
+                'Date to change it.';
+          }
           if (r.newAccount) {
-            msg += '\n🆕 New ${r.account!.type.label.toLowerCase()} found: '
+            msg +=
+                '\n🆕 New ${r.account!.type.label.toLowerCase()} found: '
                 '${r.account!.displayName}. You can rename it in Accounts.';
           }
           out.add(_bot(msg, txnId: r.txn!.id));
@@ -380,10 +463,14 @@ class ChatEngine {
         if (failed > 0) '❓ $failed not understood',
       ];
       if (added == 0 && dup == 0) {
-        out.add(_bot('I couldn\'t find a transaction in that message. 🤔\n'
+        out.add(
+          _bot(
+            'I couldn\'t find a transaction in that message. 🤔\n'
             'Paste a bank/UPI SMS like:\n'
             '"Rs.250 debited from A/c XX1234 to VPA swiggy@axis…"\n'
-            'or use the buttons below to add an entry manually.'));
+            'or use the buttons below to add an entry manually.',
+          ),
+        );
       } else {
         out.add(_bot(bits.join(' · ')));
       }
@@ -392,21 +479,26 @@ class ChatEngine {
   }
 }
 
-/// One-line human summary used in chat bubbles.
+/// Human summary used in chat bubbles.
 String describeTxn(AppStore store, Txn t) {
   final acc = store.accountById(t.accountId);
-  final accText = acc == null ? '' : ' · ${acc.displayName}';
-  final who = t.counterparty.isEmpty ? '' : t.counterparty;
+  final accLine = acc == null ? '' : '\n💳 ${acc.displayName}';
+  final who = t.counterparty;
+  final when = '\n📅 ${formatTxnDate(t.date)}';
   return switch (t.type) {
-    TxnType.debit => '➖ Spent ${money(t.amount)}'
-        '${who.isEmpty ? '' : ' at $who'}\n'
-        '${emojiFor(t.category)} ${t.category}$accText · ${formatDate(t.date)}',
-    TxnType.credit => '➕ Received ${money(t.amount)}'
-        '${who.isEmpty ? '' : ' from $who'}\n'
-        '${emojiFor(t.category)} ${t.category}$accText · ${formatDate(t.date)}',
-    TxnType.lend => '🤝 Lent ${money(t.amount)} to $who$accText'
-        '${t.dueDate != null ? '\n⏰ Reminder on ${formatDate(t.dueDate!)}' : ''}',
-    TxnType.borrow => '🙏 Borrowed ${money(t.amount)} from $who$accText'
-        '${t.dueDate != null ? '\n⏰ Repay by ${formatDate(t.dueDate!)}' : ''}',
+    TxnType.debit =>
+      '➖ Spent ${money(t.amount)}'
+          '${who.isEmpty ? '' : ' at $who'}\n'
+          '${emojiFor(t.category)} ${t.category}$accLine$when',
+    TxnType.credit =>
+      '➕ Received ${money(t.amount)}'
+          '${who.isEmpty ? '' : ' from $who'}\n'
+          '${emojiFor(t.category)} ${t.category}$accLine$when',
+    TxnType.lend =>
+      '🤝 Lent ${money(t.amount)} to $who$accLine$when'
+          '${t.dueDate != null ? '\n⏰ Reminder on ${formatDate(t.dueDate!)}' : ''}',
+    TxnType.borrow =>
+      '🙏 Borrowed ${money(t.amount)} from $who$accLine$when'
+          '${t.dueDate != null ? '\n⏰ Repay by ${formatDate(t.dueDate!)}' : ''}',
   };
 }
