@@ -1,0 +1,173 @@
+name: Build apps
+
+# Runs the tests, then builds Android, Windows, macOS and Linux versions.
+# Download the results from the "Artifacts" section of each workflow run.
+#
+# Login & sync settings are built in (lib/config.dart).
+#
+# Releases: pushing a version tag (e.g. v1.0.0) also publishes a GitHub
+# Release with the four installers attached, downloadable without a
+# GitHub account once the repository is public.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  android:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # Retry once: the first build downloads Gradle from github.com, which
+      # occasionally fails with a temporary server error (e.g. HTTP 504).
+      - name: Build APK
+        run: flutter build apk --release || (echo "Retrying after a failed download…" && sleep 30 && flutter build apk --release)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spend-utilizer-android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+      - name: Package for release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/SpendUtilizer-${GITHUB_REF_NAME}-android.apk"
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: release-android
+          path: dist/
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build windows --release
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spend-utilizer-windows
+          path: build/windows/x64/runner/Release/
+      - name: Package for release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item -Recurse build/windows/x64/runner/Release "Spend Utilizer"
+          Compress-Archive -Path "Spend Utilizer" -DestinationPath "dist/SpendUtilizer-$env:GITHUB_REF_NAME-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: release-windows
+          path: dist/
+
+  macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - name: Zip the app
+        run: |
+          cd build/macos/Build/Products/Release
+          ditto -c -k --sequesterRsrc --keepParent "Spend Utilizer.app" "$GITHUB_WORKSPACE/SpendUtilizer-macOS.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spend-utilizer-macos
+          path: SpendUtilizer-macOS.zip
+      - name: Package for release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir -p dist
+          cp SpendUtilizer-macOS.zip "dist/SpendUtilizer-${GITHUB_REF_NAME}-macos.zip"
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: release-macos
+          path: dist/
+
+  linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build linux --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spend-utilizer-linux
+          path: build/linux/x64/release/bundle/
+      - name: Package for release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          # tar keeps the "executable" permission (zip downloads lose it).
+          mkdir -p dist
+          cp -r build/linux/x64/release/bundle spend-utilizer
+          tar -czf "dist/SpendUtilizer-${GITHUB_REF_NAME}-linux-x64.tar.gz" spend-utilizer
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: release-linux
+          path: dist/
+
+  release:
+    # Only for version tags, after all four apps built.
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [android, windows, macos, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - run: ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Spend Utilizer ${{ github.ref_name }}
+          body_path: .github/RELEASE_NOTES.md
+          files: dist/*
