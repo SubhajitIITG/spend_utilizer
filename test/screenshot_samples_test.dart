@@ -5,6 +5,8 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spend_utilizer/data/store.dart';
+import 'package:spend_utilizer/models/models.dart';
+import 'package:spend_utilizer/services/chat_engine.dart';
 import 'package:spend_utilizer/services/screenshot_parser.dart';
 
 const gpayPaid = '''I
@@ -213,6 +215,41 @@ UPI Ref No: 219134343434
 10:22 PM, 27 Oct 2026
 Paytm UPI YES BANK''';
 
+// slice "Paid" screen, with the status bar and a "Pay again" button on
+// the name line, as the phone's text reader returns it.
+const slicePaid = '''19:21
+9%
+Paid ₹26
+To Sharma Caterers Itgn Pay again
+07 Nov ’26, 05:44 pm
+Notes: UPI
+Claim reward
+Play and win
+Food & dining Edit
+Details Share
+From: slice CC
+RuPay xx7731
+To: Sharma Caterers Itgn
+q0123456789@ybl''';
+
+const slicePaid2 = '''19:15
+10%
+Paid ₹60
+To Vendor Stall 03
+Pay again
+08 Nov ’26, 02:47 pm
+Notes: UPI
+Claim reward
+Play and win
+Groceries
+Edit
+Details
+Share
+From: slice CC
+RuPay xx7731
+To: Vendor Stall 03
+paytm.d1234567890@pty''';
+
 void main() {
   final now = DateTime(2026, 11, 8, 12);
   ParsedScreenshot p(String s) {
@@ -221,10 +258,10 @@ void main() {
     return r!;
   }
 
-  Future<ScreenshotReport> check(String s) async {
+  Future<ScreenshotReport> check(String s, {DateTime? at}) async {
     final store = AppStore(storage: MemoryStorage());
     await store.load();
-    return ScreenshotChecker.check(p(s), store, now: now);
+    return ScreenshotChecker.check(p(s), store, now: at ?? now);
   }
 
   void expect5(
@@ -495,5 +532,64 @@ void main() {
         );
       },
     );
+  });
+
+  group('slice paid screens', () {
+    test('reads amount, payee, card, date and category', () {
+      final r = p(slicePaid);
+      expect(r.app, PaymentApp.slice);
+      expect(r.received, isFalse);
+      expect(r.amount, 26);
+      expect(r.who, 'Sharma Caterers Itgn');
+      expect(r.date, DateTime(2026, 11, 7, 17, 44));
+      expect(r.bank, 'Slice');
+      expect(r.last4, '7731');
+      expect(r.accountType, AccountType.creditCard);
+      expect(r.appCategory, 'Food & Dining');
+      expect(r.utr, '');
+
+      final r2 = p(slicePaid2);
+      expect(r2.amount, 60);
+      expect(r2.who, 'Vendor Stall 03');
+      expect(r2.date, DateTime(2026, 11, 8, 14, 47));
+      expect(r2.appCategory, 'Groceries');
+      expect(r2.upiId, 'paytm.d1234567890@pty');
+    });
+
+    for (final misread in ['Z26', '%26', '*26', '?26', '26', 'z 26']) {
+      test('"Paid ₹26" read as "Paid $misread"', () {
+        expect(
+          p(slicePaid.replaceFirst('Paid ₹26', 'Paid $misread')).amount,
+          26,
+        );
+      });
+    }
+
+    test('not called suspicious; phone clock after payment is fine', () async {
+      // Checked the same evening, as on the phone (clock 19:15–19:21).
+      for (final s in [slicePaid, slicePaid2]) {
+        final r = await check(s, at: DateTime(2026, 11, 8, 19, 25));
+        expect(
+          r.verdict,
+          isNot(Verdict.suspicious),
+          reason: r.checks.map((c) => c.text).join('\n'),
+        );
+      }
+    });
+
+    test('added as a credit-card payment in the shown category', () async {
+      final store = AppStore(storage: MemoryStorage());
+      await store.load();
+      final e = ChatEngine(store);
+      e.handleScreenshot(slicePaid, now: now);
+      e.handle(addShotOption);
+      final t = store.txns.single;
+      expect(t.amount, 26);
+      expect(t.category, 'Food & Dining');
+      final acc = store.accountById(t.accountId)!;
+      expect(acc.bank, 'Slice');
+      expect(acc.type, AccountType.creditCard);
+      expect(acc.last4, '7731');
+    });
   });
 }

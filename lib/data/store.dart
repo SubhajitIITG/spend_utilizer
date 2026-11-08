@@ -504,13 +504,19 @@ class AppStore extends ChangeNotifier {
     required String refNo,
     required String bank,
     required String last4,
+    AccountType accountType = AccountType.savings,
     required String category,
     required String rawText,
   }) {
     Account? account;
     if (last4.isNotEmpty && bank != 'Unknown Bank') {
-      final (found, _) = findOrCreateAccount(bank, AccountType.savings, last4);
+      final (found, _) = findOrCreateAccount(bank, accountType, last4);
       account = found.ownership == Ownership.notMine ? null : found;
+    } else if (last4.isNotEmpty) {
+      // Bank not shown (e.g. only a logo): use the user's account with
+      // these last digits, if there's exactly one.
+      final matches = selectableAccounts.where((a) => a.last4 == last4);
+      if (matches.length == 1) account = matches.first;
     }
     final rule = merchants[merchantKey(counterparty)];
     final t = Txn(

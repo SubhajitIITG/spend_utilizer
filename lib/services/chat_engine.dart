@@ -356,8 +356,11 @@ class ChatEngine {
         !RegExp(r'^(yes|add)\b', caseSensitive: false).hasMatch(text)) {
       return [_bot('Tap "Add it" or "Don\'t add".')];
     }
+    // Prefer the category the payment app itself shows (slice, Paytm…).
     final category = p.received
         ? 'Transfer'
+        : p.appCategory.isNotEmpty
+        ? p.appCategory
         : guessCategory(isCredit: false, merchant: p.who, message: p.rawText);
     final t = store.addFromScreenshot(
       received: p.received,
@@ -367,6 +370,7 @@ class ChatEngine {
       refNo: p.utr,
       bank: p.bank,
       last4: p.last4,
+      accountType: p.accountType,
       category: category,
       rawText: p.rawText,
     );

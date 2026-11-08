@@ -52,6 +52,14 @@ class ParsedScreenshot {
   final String bank;
   final String last4;
 
+  /// Savings account, credit card ("slice CC", "Credit Card") or debit
+  /// card, as far as the user's part of the screen tells.
+  final AccountType accountType;
+
+  /// Category the payment app itself shows (slice: "Food & dining"),
+  /// mapped to the app's own categories; empty when none is shown.
+  final String appCategory;
+
   /// Null when the screenshot shows no date.
   final DateTime? date;
 
@@ -80,6 +88,8 @@ class ParsedScreenshot {
     required this.upiId,
     required this.bank,
     required this.last4,
+    this.accountType = AccountType.savings,
+    this.appCategory = '',
     required this.date,
     required this.hasTime,
     required this.utr,
@@ -111,7 +121,7 @@ class ScreenshotParser {
     final received = _isReceived(lines);
     final (counterparty, upiId) = _counterparty(lines, received);
     final (date, hasTime) = _dateTime(lines, now);
-    final (bank, last4) = _ownAccount(lines, received);
+    final (bank, last4, accountType) = _ownAccount(lines, received);
 
     return ParsedScreenshot(
       app: _app(lower),
@@ -122,6 +132,8 @@ class ScreenshotParser {
       upiId: upiId,
       bank: bank,
       last4: last4,
+      accountType: accountType,
+      appCategory: _appCategory(lines),
       date: date,
       hasTime: hasTime,
       utr: _utr(lines),
@@ -226,6 +238,17 @@ class ScreenshotParser {
         if (v != null && v > 0 && v < 10000000) return v;
       }
     }
+    // "Paid ₹26" where OCR misread the ₹ as Z, %, *, ? or dropped it.
+    for (final l in lines) {
+      final m = RegExp(
+        r'^(?:paid|received|sent|amount|total|payment of)\s*[?%zZ*₹]?\s*'
+        r'([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*$',
+        caseSensitive: false,
+      ).firstMatch(l);
+      if (m == null) continue;
+      final v = double.tryParse(m.group(1)!.replaceAll(',', ''));
+      if (v != null && v > 0 && v < 10000000) return v;
+    }
     // A big amount on its own line, e.g. "1,250" with the ₹ sign lost.
     for (final l in lines) {
       if (!RegExp(r'^([0-9]{1,3}(?:,[0-9]{2,3})+|[0-9]{1,6})(?:\.[0-9]{1,2})?$')
@@ -278,7 +301,8 @@ class ScreenshotParser {
       }
       // A name wrapped onto the next line: "Paytm" / "Cashback".
       if (name.isNotEmpty && j < lines.length && _isContinuation(lines[j])) {
-        name = '$name ${_cleanName(lines[j])}';
+        final more = _cleanName(lines[j]);
+        if (more.isNotEmpty) name = '$name $more';
         j++;
       }
       if (_upiRe.hasMatch(name)) {
@@ -290,6 +314,19 @@ class ScreenshotParser {
         final m2 = _upiRe.firstMatch(lines[k]);
         if (m2 != null) upi = m2.group(1)!;
       }
+      // slice repeats the name lower down ("To: Name") with the UPI ID
+      // under it.
+      if (upi.isEmpty && name.isNotEmpty) {
+        final lname = name.toLowerCase();
+        for (var k = j; k + 1 < lines.length; k++) {
+          if (!lines[k].toLowerCase().contains(lname)) continue;
+          final m2 = _upiRe.firstMatch(lines[k + 1]);
+          if (m2 != null) {
+            upi = m2.group(1)!;
+            break;
+          }
+        }
+      }
       if (name.isNotEmpty || upi.isNotEmpty) return (name, upi);
     }
     return ('', '');
@@ -297,6 +334,13 @@ class ScreenshotParser {
 
   /// Removes amounts, separators and stray symbols from a name line.
   static String _cleanName(String s) => s
+      .replaceAll(
+        RegExp(
+          r'\b(pay again|repeat payment|split|share|edit)\b\s*$',
+          caseSensitive: false,
+        ),
+        '',
+      )
       .replaceAll(_currencyAmount, '')
       .replaceAll(RegExp(r'[•·|:✓✔]'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
@@ -330,7 +374,21 @@ class ScreenshotParser {
   /// of the screen ("From" when paying, "To" / "Credited to" when
   /// receiving), so the other party's account and footers like "YES BANK"
   /// are never mistaken for the user's.
-  static (String, String) _ownAccount(List<String> lines, bool received) {
+  static AccountType _typeOf(String section) {
+    final l = section.toLowerCase();
+    if (RegExp(r'\b(cc|credit card|credit)\b').hasMatch(l)) {
+      return AccountType.creditCard;
+    }
+    if (RegExp(r'\b(debit card|dc)\b').hasMatch(l)) {
+      return AccountType.debitCard;
+    }
+    return AccountType.savings;
+  }
+
+  static (String, String, AccountType) _ownAccount(
+    List<String> lines,
+    bool received,
+  ) {
     final ownLabel = received
         ? RegExp(
             r'^(to\b|credited to|credited account|credited in)',
@@ -364,7 +422,11 @@ class ScreenshotParser {
       final m =
           masked.firstMatch(sectionText) ?? bankDigits.firstMatch(sectionText);
       if (m != null) {
-        return (SmsParser.bankIn(sectionText), _tail4(m.group(1)!));
+        return (
+          SmsParser.bankIn(sectionText),
+          _tail4(m.group(1)!),
+          _typeOf(sectionText),
+        );
       }
     }
     // Google Pay shows the user's bank as a header: "AU Small Finance Bank
@@ -374,13 +436,58 @@ class ScreenshotParser {
       final start = noUpi.lastIndexOf('\n', m.start - 1);
       final lineText = noUpi.substring(start < 0 ? 0 : start, m.end);
       final bank = SmsParser.bankIn(lineText);
-      if (bank != 'Unknown Bank') return (bank, m.group(1)!);
+      if (bank != 'Unknown Bank') {
+        return (bank, m.group(1)!, _typeOf(lineText));
+      }
     }
-    return ('Unknown Bank', '');
+    return ('Unknown Bank', '', AccountType.savings);
   }
 
   static String _tail4(String d) =>
       d.length > 4 ? d.substring(d.length - 4) : d;
+
+  // ------------------------------------------------------- app category
+
+  /// Labels payment apps show (slice, Paytm…) → this app's categories.
+  static const _appCategories = {
+    'food & dining': 'Food & Dining',
+    'food and dining': 'Food & Dining',
+    'food': 'Food & Dining',
+    'groceries': 'Groceries',
+    'grocery': 'Groceries',
+    'shopping': 'Shopping',
+    'travel': 'Travel',
+    'transport': 'Transport',
+    'commute': 'Transport',
+    'fuel': 'Fuel',
+    'bills & utilities': 'Utilities & Bills',
+    'bills and utilities': 'Utilities & Bills',
+    'bills': 'Utilities & Bills',
+    'utilities': 'Utilities & Bills',
+    'recharge': 'Mobile & Internet',
+    'entertainment': 'Entertainment',
+    'health': 'Health',
+    'medical': 'Health',
+    'education': 'Education',
+    'rent': 'Rent',
+    'emi': 'EMI & Loans',
+    'investments': 'Investments',
+    'personal care': 'Personal Care',
+  };
+
+  static String _appCategory(List<String> lines) {
+    for (final l in lines) {
+      // "Food & dining" on its own, or followed by an "Edit" button.
+      final key = l
+          .toLowerCase()
+          .replaceAll(RegExp(r'\s+edit$'), '')
+          .replaceAll(RegExp(r'[^a-z& ]'), '')
+          .trim();
+      final c = _appCategories[key];
+      if (c != null) return c;
+    }
+    return '';
+  }
 
   // ------------------------------------------------------------ reference
 
