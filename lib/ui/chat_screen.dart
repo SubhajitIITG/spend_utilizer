@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +7,7 @@ import '../data/store.dart';
 import '../models/models.dart';
 import '../services/categories.dart';
 import '../services/chat_engine.dart';
+import '../services/ocr_service.dart';
 import '../util/format.dart';
 import 'profile_screen.dart';
 import 'theme.dart';
@@ -136,6 +138,38 @@ class _ChatScreenState extends State<ChatScreen> {
     _focus.requestFocus();
   }
 
+  /// Android: pick a payment screenshot, read it on the device and let the
+  /// chat engine check it.
+  Future<void> _pickScreenshot() async {
+    final store = context.read<AppStore>();
+    final messenger = ScaffoldMessenger.of(context);
+    final file = await FilePicker.pickFile(type: FileType.image);
+    final path = file?.path;
+    if (path == null || !mounted) return;
+    if (engine.active) engine.cancel();
+    store.addChat(
+      ChatMessage(
+        id: store.newId(),
+        fromUser: true,
+        text: '📷 Payment screenshot',
+        time: DateTime.now(),
+      ),
+    );
+    setState(() {});
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Reading the screenshot…')),
+    );
+    String text;
+    try {
+      text = await OcrService.readText(path);
+    } catch (e) {
+      text = ''; // reported below as "couldn't find a payment"
+    }
+    if (!mounted) return;
+    messenger.hideCurrentSnackBar();
+    _post(engine.handleScreenshot(text));
+  }
+
   Future<void> _pickDate() async {
     final now = DateTime.now();
     final past = engine.askingPastDate;
@@ -189,6 +223,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onPaste: _pasteFromClipboard,
             onPickDate: _pickDate,
             onClearChat: store.chat.isEmpty ? null : _confirmClearChat,
+            onScreenshot: OcrService.isSupported ? _pickScreenshot : null,
           ),
           Container(
             decoration: BoxDecoration(
@@ -212,6 +247,15 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                       onPressed: _pasteFromClipboard,
                     ),
+                    if (OcrService.isSupported)
+                      IconButton(
+                        tooltip: 'Add a payment screenshot',
+                        icon: Icon(
+                          Icons.add_photo_alternate_outlined,
+                          color: scheme.primary,
+                        ),
+                        onPressed: _pickScreenshot,
+                      ),
                     Expanded(
                       child: CallbackShortcuts(
                         bindings: {
@@ -353,6 +397,9 @@ class _OptionsBar extends StatelessWidget {
   /// Null hides the "Clear chat" chip (nothing to clear).
   final VoidCallback? onClearChat;
 
+  /// Null hides the "Screenshot" chip (reading needs Android or iOS).
+  final VoidCallback? onScreenshot;
+
   const _OptionsBar({
     required this.engine,
     required this.onFlow,
@@ -360,6 +407,7 @@ class _OptionsBar extends StatelessWidget {
     required this.onPaste,
     required this.onPickDate,
     required this.onClearChat,
+    this.onScreenshot,
   });
 
   @override
@@ -373,6 +421,15 @@ class _OptionsBar extends StatelessWidget {
           onPressed: onPaste,
         ),
       );
+      if (onScreenshot != null) {
+        chips.add(
+          ActionChip(
+            avatar: const Text('📷'),
+            label: const Text('Screenshot'),
+            onPressed: onScreenshot,
+          ),
+        );
+      }
       for (final f in [
         ChatFlow.debit,
         ChatFlow.credit,

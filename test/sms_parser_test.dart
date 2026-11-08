@@ -187,6 +187,13 @@ void main() {
     );
   });
 
+  test('a time after the month is not taken as the year', () {
+    expect(
+      p('Rs 99 debited from A/c XX1234 on 08 Nov, 09:15 AM to SWIGGY').date,
+      DateTime(2026, 11, 8, 9, 15),
+    );
+  });
+
   test('missing or impossible dates fall back to now and say so', () {
     final r = p('Rs 75 debited from A/c XX1234 to VPA chai@ybl');
     expect(r.dateFound, isFalse);

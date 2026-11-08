@@ -124,6 +124,17 @@ class SmsParser {
     );
   }
 
+  // ---------------------------------------------------- shared helpers
+  // Used by the payment-screenshot reader, which sees similar text.
+
+  static String bankIn(String text) => _bank(text.toLowerCase());
+
+  static (String, String) accountDigitsIn(String text, TxnType type) =>
+      _accountDigits(text, type);
+
+  /// (date, whether a date was actually found).
+  static (DateTime, bool) dateIn(String text, DateTime now) => _date(text, now);
+
   // ---------------------------------------------------------------- amount
 
   static final _amountRe = RegExp(
@@ -463,18 +474,21 @@ class SmsParser {
       dateEnd = iso.end;
     }
 
-    // 05-Nov-26, 05 Nov 2026, 05Nov26, 5 November
+    // No year written ("5 Nov", "November 7"): this year, or last year if
+    // that would be in the future.
+    var yearImplied = false;
+
+    // 05-Nov-26, 05 Nov 2026, 05Nov26, 5 November, 27 Oct '26
     if (candidate == null) {
       final named = RegExp(
         r'\b(\d{1,2})(?:st|nd|rd|th)?[-\s]?'
         r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)'
-        r'[a-z]*[-\s,]*(\d{4}|\d{2})?\b',
+        r"[a-z]*[-\s,'’]*(?:(\d{4}|\d{2})(?![:\d]))?\b",
         caseSensitive: false,
       ).firstMatch(text);
       if (named != null) {
-        final y = named.group(3) == null
-            ? now.year
-            : _year(int.parse(named.group(3)!));
+        yearImplied = named.group(3) == null;
+        final y = yearImplied ? now.year : _year(int.parse(named.group(3)!));
         candidate = _safeDate(
           y,
           _months[named.group(2)!.toLowerCase()]!,
@@ -484,16 +498,17 @@ class SmsParser {
       }
     }
 
-    // Nov 05, 2026
+    // Nov 05, 2026 / November 7 at 2:00 PM
     if (candidate == null) {
       final monthFirst = RegExp(
         r'\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+'
-        r'(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b',
+        r'(\d{1,2})(?:st|nd|rd|th)?\b(?!:)(?:,?\s+(\d{4})\b)?',
         caseSensitive: false,
       ).firstMatch(text);
       if (monthFirst != null) {
+        yearImplied = monthFirst.group(3) == null;
         candidate = _safeDate(
-          int.parse(monthFirst.group(3)!),
+          yearImplied ? now.year : int.parse(monthFirst.group(3)!),
           _months[monthFirst.group(1)!.toLowerCase()]!,
           int.parse(monthFirst.group(2)!),
         );
@@ -516,6 +531,9 @@ class SmsParser {
     }
 
     if (candidate == null) return (now, false);
+    if (yearImplied && candidate.isAfter(now.add(const Duration(days: 1)))) {
+      candidate = DateTime(candidate.year - 1, candidate.month, candidate.day);
+    }
     // Bank messages arrive soon after the transaction, so a date in the
     // future means we misread it.
     if (candidate.isAfter(now.add(const Duration(days: 1)))) {

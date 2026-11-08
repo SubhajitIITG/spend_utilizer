@@ -10,6 +10,7 @@ import '../data/store.dart';
 import '../models/models.dart';
 import '../util/format.dart';
 import 'categories.dart';
+import 'screenshot_parser.dart';
 import 'sms_parser.dart';
 
 enum ChatFlow {
@@ -25,6 +26,9 @@ enum ChatFlow {
 
   /// Bot-initiated: "is this account / card yours?"
   ownership,
+
+  /// "Add this payment from the screenshot?"
+  screenshot,
 }
 
 enum InputKind { text, amount, date }
@@ -39,6 +43,7 @@ extension ChatFlowX on ChatFlow {
     ChatFlow.reminder => 'Reminder',
     ChatFlow.merchant => 'Regular payment',
     ChatFlow.ownership => 'Account check',
+    ChatFlow.screenshot => 'Screenshot',
   };
   String get emoji => switch (this) {
     ChatFlow.none => '📋',
@@ -49,6 +54,7 @@ extension ChatFlowX on ChatFlow {
     ChatFlow.reminder => '⏰',
     ChatFlow.merchant => '🔎',
     ChatFlow.ownership => '🏦',
+    ChatFlow.screenshot => '📷',
   };
 }
 
@@ -72,6 +78,8 @@ const cashOption = 'Cash';
 const personOption = '👤 A friend / person';
 const askLaterOption = 'Ask me later';
 const neverAskOption = 'Don\'t ask again';
+const addShotOption = '✅ Add it';
+const skipShotOption = '❌ Don\'t add';
 const mineOption = '✅ Yes, it\'s mine';
 const notMineOption = '❌ No, someone else\'s';
 
@@ -94,6 +102,7 @@ class ChatEngine {
   DateTime? _when;
   MerchantSuggestion? _merchant;
   Account? _pendingAccount;
+  ParsedScreenshot? _shot;
   bool _merchantIsPerson = false;
 
   /// Maps the account option labels shown to the user to account ids.
@@ -114,6 +123,7 @@ class ChatEngine {
   String get inputHint {
     if (!active) return 'Paste bank message(s) here…';
     if (flow == ChatFlow.ownership) return 'Tap Yes or No below';
+    if (flow == ChatFlow.screenshot) return 'Add this payment?';
     return switch (_step) {
       _Step.amount => 'Enter amount, e.g. 450',
       _Step.category => 'Pick a category or type one',
@@ -134,6 +144,9 @@ class ChatEngine {
     if (!active) return const [];
     if (flow == ChatFlow.ownership) {
       return const [mineOption, notMineOption, cancelOption];
+    }
+    if (flow == ChatFlow.screenshot) {
+      return const [addShotOption, skipShotOption];
     }
     final List<String> opts = switch (_step) {
       _Step.category =>
@@ -218,6 +231,7 @@ class ChatEngine {
       ChatFlow.reminder => [_Step.title, _Step.amount, _Step.dueDate],
       ChatFlow.merchant => [_Step.merchantKind, _Step.merchantName],
       ChatFlow.ownership => [],
+      ChatFlow.screenshot => [],
       ChatFlow.none => [],
     };
     if (_steps.isEmpty) return [];
@@ -265,6 +279,89 @@ class ChatEngine {
     }
   }
 
+  /// Handles the text read from a payment screenshot: shows what was read
+  /// and the authenticity checks, then asks whether to add it.
+  List<ChatMessage> handleScreenshot(String ocrText, {DateTime? now}) {
+    _reset();
+    final p = ScreenshotParser.parse(ocrText, now: now);
+    if (p == null) {
+      return [
+        _bot(
+          '📷 I couldn\'t find a payment in this image. Use a screenshot of '
+          'the payment\'s success screen in Google Pay, PhonePe, Paytm, BHIM '
+          'or your bank app, with the amount and date visible.',
+        ),
+      ];
+    }
+    final r = ScreenshotChecker.check(p, store, now: now);
+    final who = p.who.isEmpty
+        ? ''
+        : (p.received ? ' from ${p.who}' : ' to ${p.who}');
+    final buf = StringBuffer()
+      ..writeln('📷 Read from a ${p.app.label} screenshot:')
+      ..writeln(
+        '${p.received ? '➕ Received' : '➖ Paid'} ${money(p.amount)}$who',
+      );
+    if (p.date != null) {
+      buf.writeln(
+        '📅 ${p.hasTime ? formatTxnDate(p.date!) : formatDate(p.date!)}',
+      );
+    }
+    if (p.utr.isNotEmpty) buf.writeln('🔖 UPI ref ${p.utr}');
+    buf.writeln();
+    for (final c in r.checks) {
+      buf.writeln('${c.icon} ${c.text}');
+    }
+    buf
+      ..writeln()
+      ..write(r.verdictText);
+
+    if (r.alreadyRecorded != null) {
+      buf.write(
+        '\n\nThis payment is already in your records, so I didn\'t '
+        'add it again.',
+      );
+      return [_bot(buf.toString())];
+    }
+    if (p.status == PaymentStatus.failed) {
+      buf.write('\n\nI didn\'t add it because the payment failed.');
+      return [_bot(buf.toString())];
+    }
+    flow = ChatFlow.screenshot;
+    _shot = p;
+    buf.write('\n\nAdd it as a ${p.received ? 'credit' : 'debit'}?');
+    return [_bot(buf.toString())];
+  }
+
+  List<ChatMessage> _answerScreenshot(String text) {
+    final p = _shot!;
+    if (text == skipShotOption ||
+        RegExp(r'^no\b', caseSensitive: false).hasMatch(text)) {
+      _reset();
+      return [_bot('Okay, I didn\'t add it.')];
+    }
+    if (text != addShotOption &&
+        !RegExp(r'^(yes|add)\b', caseSensitive: false).hasMatch(text)) {
+      return [_bot('Tap "Add it" or "Don\'t add".')];
+    }
+    final category = p.received
+        ? 'Transfer'
+        : guessCategory(isCredit: false, merchant: p.who, message: p.rawText);
+    final t = store.addFromScreenshot(
+      received: p.received,
+      amount: p.amount,
+      counterparty: p.who,
+      date: p.date ?? DateTime.now(),
+      refNo: p.utr,
+      bank: p.bank,
+      last4: p.last4,
+      category: category,
+      rawText: p.rawText,
+    );
+    _reset();
+    return [_bot(describeTxn(store, t), txnId: t.id), ..._maybeAskNext()];
+  }
+
   /// Asks whether a newly found account/card belongs to the user.
   List<ChatMessage> reviewAccount(Account a) {
     _reset();
@@ -310,6 +407,7 @@ class ChatEngine {
       _reset();
       return [_bot('Cancelled. Paste a bank message or pick an option below.')];
     }
+    if (flow == ChatFlow.screenshot) return _answerScreenshot(text);
     if (flow == ChatFlow.ownership) {
       final a = _pendingAccount!;
       final yes =
@@ -379,6 +477,7 @@ class ChatEngine {
     _when = null;
     _merchant = null;
     _pendingAccount = null;
+    _shot = null;
     _merchantIsPerson = false;
     _accountOptions.clear();
   }
@@ -400,7 +499,10 @@ class ChatEngine {
           ChatFlow.lend => 'How much did you lend to $_person?',
           ChatFlow.borrow => 'How much did you borrow from $_person?',
           ChatFlow.reminder => 'Amount involved? (tap Skip if none)',
-          ChatFlow.merchant || ChatFlow.ownership || ChatFlow.none => '',
+          ChatFlow.merchant ||
+          ChatFlow.ownership ||
+          ChatFlow.screenshot ||
+          ChatFlow.none => '',
         };
       case _Step.txnDate:
         return switch (flow) {

@@ -439,6 +439,13 @@ class AppStore extends ChangeNotifier {
   bool _isDuplicate(ParsedSms p, String raw) {
     final norm = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
     for (final t in txns) {
+      // Same payment already added from a screenshot.
+      if (t.source == 'screenshot' &&
+          p.refNo.isNotEmpty &&
+          t.refNo == p.refNo &&
+          t.amount == p.amount) {
+        return true;
+      }
       if (t.source != 'sms') continue;
       if (p.refNo.isNotEmpty && t.refNo == p.refNo && t.amount == p.amount) {
         return true;
@@ -486,6 +493,44 @@ class AppStore extends ChangeNotifier {
       newAccount: isNew,
       dateFound: p.dateFound,
     );
+  }
+
+  /// Records a payment read from a screenshot (see screenshot_parser).
+  Txn addFromScreenshot({
+    required bool received,
+    required double amount,
+    required String counterparty,
+    required DateTime date,
+    required String refNo,
+    required String bank,
+    required String last4,
+    required String category,
+    required String rawText,
+  }) {
+    Account? account;
+    if (last4.isNotEmpty && bank != 'Unknown Bank') {
+      final (found, _) = findOrCreateAccount(bank, AccountType.savings, last4);
+      account = found.ownership == Ownership.notMine ? null : found;
+    }
+    final rule = merchants[merchantKey(counterparty)];
+    final t = Txn(
+      id: newId(),
+      type: received ? TxnType.credit : TxnType.debit,
+      amount: amount,
+      category: !received && (rule?.decided ?? false)
+          ? rule!.category
+          : category,
+      accountId: account?.id,
+      counterparty: counterparty,
+      date: date,
+      source: 'screenshot',
+      rawMessage: rawText,
+      refNo: refNo,
+    );
+    txns.add(t);
+    _touchTxn(t);
+    _changed();
+    return t;
   }
 
   // -------------------------------------------------------------- merchants
