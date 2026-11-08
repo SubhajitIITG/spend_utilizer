@@ -280,10 +280,17 @@ void main() {
       expect(store.txns.length, 1);
     });
 
-    test('unreadable image gets a helpful message', () {
+    test('no text, unreadable text and errors are explained', () {
       expect(
         e.handleScreenshot('', now: now).single.text,
-        contains('couldn\'t find a payment'),
+        contains('couldn\'t find any text'),
+      );
+      final r = e.handleScreenshot('Some app\nHello there', now: now);
+      expect(r.single.text, contains('This is what I could read'));
+      expect(r.single.text, contains('Hello there'));
+      expect(
+        e.screenshotError(Exception('boom')).single.text,
+        contains('boom'),
       );
     });
   });

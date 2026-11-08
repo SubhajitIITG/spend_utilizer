@@ -144,8 +144,12 @@ class _ChatScreenState extends State<ChatScreen> {
     final store = context.read<AppStore>();
     final messenger = ScaffoldMessenger.of(context);
     final file = await FilePicker.pickFile(type: FileType.image);
-    final path = file?.path;
-    if (path == null || !mounted) return;
+    if (file == null || !mounted) return; // cancelled
+    final path = file.path;
+    if (path == null) {
+      _post(engine.screenshotError('the picked image could not be opened'));
+      return;
+    }
     if (engine.active) engine.cancel();
     store.addChat(
       ChatMessage(
@@ -159,15 +163,16 @@ class _ChatScreenState extends State<ChatScreen> {
     messenger.showSnackBar(
       const SnackBar(content: Text('Reading the screenshot…')),
     );
-    String text;
     try {
-      text = await OcrService.readText(path);
+      final text = await OcrService.readText(path);
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      _post(engine.handleScreenshot(text));
     } catch (e) {
-      text = ''; // reported below as "couldn't find a payment"
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      _post(engine.screenshotError(e));
     }
-    if (!mounted) return;
-    messenger.hideCurrentSnackBar();
-    _post(engine.handleScreenshot(text));
   }
 
   Future<void> _pickDate() async {

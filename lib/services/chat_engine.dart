@@ -285,11 +285,23 @@ class ChatEngine {
     _reset();
     final p = ScreenshotParser.parse(ocrText, now: now);
     if (p == null) {
+      final read = ocrText.trim();
+      if (read.isEmpty) {
+        return [
+          _bot(
+            '📷 I couldn\'t find any text in this image. Use the payment\'s '
+            'success screen from Google Pay, PhonePe, Paytm, BHIM or your '
+            'bank app, as a normal (not cropped too tightly) screenshot.',
+          ),
+        ];
+      }
+      // Show what was read, so a missed layout can be reported and fixed.
+      final shown = read.split('\n').take(25).join('\n');
       return [
         _bot(
-          '📷 I couldn\'t find a payment in this image. Use a screenshot of '
-          'the payment\'s success screen in Google Pay, PhonePe, Paytm, BHIM '
-          'or your bank app, with the amount and date visible.',
+          '📷 I read text in this image but couldn\'t find the payment '
+          'amount. This is what I could read:\n\n$shown\n\nIf this is a '
+          'payment screenshot, please send this message to the developer.',
         ),
       ];
     }
@@ -360,6 +372,18 @@ class ChatEngine {
     );
     _reset();
     return [_bot(describeTxn(store, t), txnId: t.id), ..._maybeAskNext()];
+  }
+
+  /// The phone's text reader failed (e.g. the image couldn't be opened).
+  List<ChatMessage> screenshotError(Object error) {
+    _reset();
+    return [
+      _bot(
+        '📷 I couldn\'t read this image: $error\n\nPlease try another '
+        'screenshot, and send this message to the developer if it keeps '
+        'happening.',
+      ),
+    ];
   }
 
   /// Asks whether a newly found account/card belongs to the user.
