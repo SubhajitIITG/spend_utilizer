@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +7,8 @@ import '../data/store.dart';
 import '../models/models.dart';
 import '../services/categories.dart';
 import '../services/chat_engine.dart';
+import '../services/ocr_service.dart';
+import '../services/share_inbox.dart';
 import '../util/format.dart';
 import 'profile_screen.dart';
 import 'theme.dart';
@@ -26,8 +29,48 @@ class _ChatScreenState extends State<ChatScreen> {
   ChatEngine get engine =>
       _engine ??= ChatEngine(context.read<AppStore>())..resumePendingQuestion();
 
+  ShareInbox? _inbox;
+  bool _draining = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final inbox = context.read<ShareInbox>();
+    if (!identical(inbox, _inbox)) {
+      _inbox?.removeListener(_onShared);
+      _inbox = inbox..addListener(_onShared);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _drainShares());
+    }
+  }
+
+  void _onShared() =>
+      WidgetsBinding.instance.addPostFrameCallback((_) => _drainShares());
+
+  /// Handles items shared from other apps, one at a time. A shared
+  /// screenshot waits until the previous one's "Add it?" is answered.
+  Future<void> _drainShares() async {
+    final inbox = _inbox;
+    if (inbox == null || _draining || !mounted) return;
+    _draining = true;
+    try {
+      while (mounted && inbox.hasPending) {
+        if (engine.flow == ChatFlow.screenshot) break; // answer first
+        final item = inbox.take()!;
+        if (item.imagePath != null) {
+          await _readScreenshot(item.imagePath!, shared: true);
+        } else if (item.text != null) {
+          if (engine.active) engine.cancel();
+          _send(item.text!);
+        }
+      }
+    } finally {
+      _draining = false;
+    }
+  }
+
   @override
   void dispose() {
+    _inbox?.removeListener(_onShared);
     _controller.dispose();
     _scroll.dispose();
     _focus.dispose();
@@ -104,6 +147,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     _controller.clear();
     _post(engine.handle(t));
+    // A shared screenshot may be waiting for this answer.
+    if (_inbox?.hasPending ?? false) _drainShares();
   }
 
   Future<void> _pasteFromClipboard() async {
@@ -134,6 +179,49 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     _post(engine.start(f));
     _focus.requestFocus();
+  }
+
+  /// Android: pick a payment screenshot, read it on the device and let the
+  /// chat engine check it.
+  Future<void> _pickScreenshot() async {
+    final file = await FilePicker.pickFile(type: FileType.image);
+    if (file == null || !mounted) return; // cancelled
+    final path = file.path;
+    if (path == null) {
+      _post(engine.screenshotError('the picked image could not be opened'));
+      return;
+    }
+    await _readScreenshot(path);
+  }
+
+  /// Reads a payment screenshot on the device and lets the chat engine
+  /// check it. [shared]: it came from another app's share sheet.
+  Future<void> _readScreenshot(String path, {bool shared = false}) async {
+    final store = context.read<AppStore>();
+    final messenger = ScaffoldMessenger.of(context);
+    if (engine.active) engine.cancel();
+    store.addChat(
+      ChatMessage(
+        id: store.newId(),
+        fromUser: true,
+        text: shared ? '📷 Shared payment receipt' : '📷 Payment screenshot',
+        time: DateTime.now(),
+      ),
+    );
+    setState(() {});
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Reading the screenshot…')),
+    );
+    try {
+      final text = await OcrService.readText(path);
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      _post(engine.handleScreenshot(text));
+    } catch (e) {
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      _post(engine.screenshotError(e));
+    }
   }
 
   Future<void> _pickDate() async {
@@ -189,6 +277,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onPaste: _pasteFromClipboard,
             onPickDate: _pickDate,
             onClearChat: store.chat.isEmpty ? null : _confirmClearChat,
+            onScreenshot: OcrService.isSupported ? _pickScreenshot : null,
           ),
           Container(
             decoration: BoxDecoration(
@@ -212,6 +301,15 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                       onPressed: _pasteFromClipboard,
                     ),
+                    if (OcrService.isSupported)
+                      IconButton(
+                        tooltip: 'Add a payment screenshot',
+                        icon: Icon(
+                          Icons.add_photo_alternate_outlined,
+                          color: scheme.primary,
+                        ),
+                        onPressed: _pickScreenshot,
+                      ),
                     Expanded(
                       child: CallbackShortcuts(
                         bindings: {
@@ -353,6 +451,9 @@ class _OptionsBar extends StatelessWidget {
   /// Null hides the "Clear chat" chip (nothing to clear).
   final VoidCallback? onClearChat;
 
+  /// Null hides the "Screenshot" chip (reading needs Android or iOS).
+  final VoidCallback? onScreenshot;
+
   const _OptionsBar({
     required this.engine,
     required this.onFlow,
@@ -360,6 +461,7 @@ class _OptionsBar extends StatelessWidget {
     required this.onPaste,
     required this.onPickDate,
     required this.onClearChat,
+    this.onScreenshot,
   });
 
   @override
@@ -373,9 +475,19 @@ class _OptionsBar extends StatelessWidget {
           onPressed: onPaste,
         ),
       );
+      if (onScreenshot != null) {
+        chips.add(
+          ActionChip(
+            avatar: const Text('📷'),
+            label: const Text('Screenshot'),
+            onPressed: onScreenshot,
+          ),
+        );
+      }
       for (final f in [
         ChatFlow.debit,
         ChatFlow.credit,
+        ChatFlow.invest,
         ChatFlow.lend,
         ChatFlow.borrow,
         ChatFlow.reminder,

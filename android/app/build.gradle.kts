@@ -6,7 +6,10 @@ plugins {
 
 android {
     namespace = "com.spendutilizer.spend_utilizer"
-    compileSdk = flutter.compileSdkVersion
+    // 37: receive_sharing_intent (share-sheet support) requires compiling
+    // against Android 17 APIs. The app still runs on older Android versions
+    // (minSdk is unchanged).
+    compileSdk = maxOf(flutter.compileSdkVersion, 37)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -34,6 +37,10 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

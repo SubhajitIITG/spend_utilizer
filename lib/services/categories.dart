@@ -6,6 +6,27 @@ class Category {
   const Category(this.name, this.emoji);
 }
 
+/// Every kind of investment, in the order the Dashboard and the Invest
+/// button list them. Money put into these is "Invested", not "Spent".
+const investmentTypes = <Category>[
+  Category(sipCategory, '📈'),
+  Category(stocksCategory, '📊'),
+  Category(fdCategory, '🏛️'),
+  Category(rdCategory, '📅'),
+  Category(ppfCategory, '🐖'),
+  Category(epfCategory, '👔'),
+  Category(npsCategory, '👴'),
+  Category(goldCategory, '🪙'),
+  Category(bondsCategory, '📜'),
+  Category(postOfficeCategory, '📮'),
+  Category(sukanyaCategory, '👧'),
+  Category(realEstateCategory, '🏘️'),
+  Category(cryptoCategory, '₿'),
+  Category(ulipCategory, '🛡️'),
+  Category(p2pCategory, '🤲'),
+  Category(otherInvestCategory, '💹'),
+];
+
 const debitCategories = <Category>[
   Category('Groceries', '🛒'),
   Category('Food & Dining', '🍔'),
@@ -20,12 +41,13 @@ const debitCategories = <Category>[
   Category('Education', '📚'),
   Category('Travel', '✈️'),
   Category('EMI & Loans', '🏦'),
-  Category('Investments', '📈'),
+  ...investmentTypes,
   Category('Insurance', '🛡️'),
   Category('Personal Care', '💇'),
   Category('Gifts & Donations', '🎁'),
   Category(friendsCategory, '👥'),
   Category(payeesCategory, '💸'),
+  Category(cardBillCategory, '💳'),
   Category('Others', '📦'),
 ];
 
@@ -47,6 +69,46 @@ const friendsCategory = 'Friends & Family';
 /// Money sent to people by bank transfer / UPI (not to shops).
 const payeesCategory = 'Payees';
 
+/// Monthly SIPs / mutual fund purchases. Saved, not spent: shown as
+/// "Invested" and left out of spending totals (with other investments).
+const sipCategory = 'SIP & Mutual Funds';
+const fdCategory = 'Fixed Deposit';
+const rdCategory = 'Recurring Deposit';
+const stocksCategory = 'Stocks';
+const bondsCategory = 'Bonds';
+
+const ppfCategory = 'PPF';
+const epfCategory = 'EPF / VPF';
+const npsCategory = 'NPS';
+const goldCategory = 'Gold & Silver';
+const postOfficeCategory = 'Post Office Schemes';
+const sukanyaCategory = 'Sukanya Samriddhi';
+const realEstateCategory = 'Real Estate';
+const cryptoCategory = 'Crypto';
+const ulipCategory = 'ULIP & Savings Plans';
+const p2pCategory = 'P2P Lending';
+
+/// Anything else (kept as "Investments" for existing data).
+const otherInvestCategory = 'Investments';
+
+/// Investment types, in the order the Dashboard lists them.
+final investmentCategoryOrder = [for (final c in investmentTypes) c.name];
+final investmentCategories = investmentCategoryOrder.toSet();
+
+/// How an investment type is shown in lists ("Other investments").
+String investmentLabel(String category) =>
+    category == otherInvestCategory ? 'Other investments' : category;
+
+/// Debit categories that are real spending (the Debit flow offers these;
+/// investments have their own Invest button).
+final spendingCategories = debitCategories
+    .where((c) => !investmentCategories.contains(c.name))
+    .toList();
+
+/// Paying a credit-card bill. Not new spending (the purchases were already
+/// counted on the card), so it is left out of spending totals.
+const cardBillCategory = 'Credit Card Bill';
+
 /// Categories that mean "we couldn't tell": payments in these are worth
 /// asking the user about.
 const unclearCategories = {'Others', 'Transfer', payeesCategory};
@@ -66,6 +128,187 @@ String emojiFor(String category) {
 /// Keyword → category rules for money going out. Matched against the
 /// merchant name and the full message text (lower-cased).
 const _debitRules = <String, List<String>>{
+  // First: "Bill Payment of … Credit Card" must not land in Utilities.
+  cardBillCategory: [
+    'credit card bill',
+    'card bill payment',
+    'bill payment of',
+    'deposited to card',
+    'ccbillpay',
+    'cred club',
+    'creditcard bill',
+  ],
+  // SIPs often arrive as auto-debits ("ACH D- BSE LIMITED", "NACH …
+  // ICCL"): match them before EMI's generic 'nach'.
+  sipCategory: [
+    'sip',
+    'mutual fund',
+    'mutualfund',
+    'mf sip',
+    'bse limited',
+    'bse ltd',
+    'bsestarmf',
+    'bse star',
+    'iccl',
+    'indian clearing',
+    'cams',
+    'kfintech',
+    'kfin',
+    'mf utilit',
+    'groww',
+    'kuvera',
+    'coin by zerodha',
+    'paytm money',
+    'et money',
+    'etmoney',
+    'scripbox',
+    'fundsindia',
+    'sbi mf',
+    'hdfc mf',
+    'icici pru',
+    'axis mf',
+    'nippon india mf',
+    'nippon',
+    'mirae',
+    'ppfas',
+    'parag parikh',
+    'kotak mf',
+    'uti mf',
+    'quant mf',
+    'aditya birla sun life',
+    'absl mf',
+    'dsp mf',
+    'tata mf',
+    'franklin templeton',
+    'motilal oswal mf',
+    'edelweiss mf',
+    'canara robeco',
+    'sundaram mf',
+    'invesco',
+    'hsbc mf',
+    'bandhan mf',
+  ],
+  goldCategory: [
+    'digital gold',
+    'safegold',
+    'mmtc-pamp',
+    'augmont',
+    'jar app',
+    'sgb',
+    'sovereign gold',
+    'gold etf',
+    'goldbees',
+    'gold fund',
+    'silver etf',
+  ],
+  bondsCategory: [
+    'bond',
+    'rbi retail direct',
+    'rbi bonds',
+    'ncd',
+    'debenture',
+    'wint wealth',
+    'grip invest',
+    'goldenpi',
+    'indiabonds',
+    'tbill',
+    't-bill',
+    'treasury bill',
+    'g-sec',
+    'gsec',
+  ],
+  fdCategory: [
+    'fixed deposit',
+    'fd booked',
+    'fd booking',
+    'fd opened',
+    'fd opening',
+    'fd created',
+    'fd a/c',
+    'fd ac',
+    'fd account',
+    'fd no',
+    'new fd',
+    'term deposit',
+    'tdr',
+    'stable money',
+    'flexi deposit',
+  ],
+  rdCategory: [
+    'recurring deposit',
+    'rd instal',
+    'rd a/c',
+    'rd ac',
+    'rd account',
+    'rd no',
+    'new rd',
+  ],
+  stocksCategory: [
+    'zerodha',
+    'upstox',
+    'angel one',
+    'angel broking',
+    'icici direct',
+    'icicidirect',
+    'icici securities',
+    'hdfc securities',
+    'kotak securities',
+    'sharekhan',
+    '5paisa',
+    'motilal oswal fin',
+    'axis direct',
+    'sbicap securities',
+    'paytm money stocks',
+    'groww stocks',
+    'dhan.co',
+    'nsccl',
+    'nse clearing',
+    'shares',
+    'stock',
+    'equity',
+    'ipo',
+    'smallcase',
+    'indmoney',
+  ],
+  ppfCategory: ['ppf', 'public provident'],
+  sukanyaCategory: ['sukanya', 'ssy a/c', 'ssy account'],
+  epfCategory: ['epfo', 'epf ', 'vpf', 'employees provident', 'provident fund'],
+  npsCategory: ['nps', 'national pension', 'pran ', 'protean cra', 'kfin cra'],
+  postOfficeCategory: [
+    'post office',
+    'india post',
+    'ippb',
+    'kisan vikas',
+    'kvp',
+    'national savings certificate',
+    'nsc ',
+    'scss',
+    'senior citizen savings',
+    'pomis',
+    'monthly income scheme',
+  ],
+  cryptoCategory: [
+    'wazirx',
+    'coindcx',
+    'coinswitch',
+    'zebpay',
+    'mudrex',
+    'giottus',
+    'bitbns',
+    'binance',
+    'bitcoin',
+    'crypto',
+  ],
+  realEstateCategory: ['strata', 'hbits', 'property booking', 'reit '],
+  ulipCategory: ['ulip'],
+  p2pCategory: [
+    'lendenclub',
+    'faircent',
+    'liquiloans',
+    'lendbox',
+    '12% club',
+    'p2p',
+  ],
   'Groceries': [
     'bigbasket',
     'blinkit',
@@ -244,20 +487,6 @@ const _debitRules = <String, List<String>>{
     'books',
   ],
   'EMI & Loans': ['emi', 'loan', 'bajaj finserv', 'nach', 'ecs'],
-  'Investments': [
-    'zerodha',
-    'groww',
-    'upstox',
-    'mutual fund',
-    'sip',
-    'kuvera',
-    'coin by',
-    'nps',
-    'ppf',
-    'smallcase',
-    'angel one',
-    'indmoney',
-  ],
   'Insurance': ['insurance', 'lic', 'policybazaar', 'premium', 'acko'],
   'Personal Care': ['salon', 'spa', 'urban company', 'urbanclap', 'parlour'],
   'Gifts & Donations': ['donation', 'charity', 'temple', 'gift', 'ketto'],
@@ -268,7 +497,17 @@ const _creditRules = <String, List<String>>{
   'Cashback & Rewards': ['cashback', 'cash back', 'reward', 'scratch card'],
   'Salary': ['salary', 'sal ', 'payroll', 'neft-sal', 'stipend'],
   'Interest': ['interest', 'int.pd', 'int pd', 'int.cr'],
-  'Investment Returns': ['dividend', 'redemption', 'maturity'],
+  'Investment Returns': [
+    'dividend',
+    'redemption',
+    'maturity',
+    'matured',
+    'fd closure',
+    'fd closed',
+    'premature',
+    'rd closure',
+    'interest on fd',
+  ],
 };
 
 final _patternCache = <String, RegExp>{};

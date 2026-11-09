@@ -4,6 +4,8 @@ import 'package:spend_utilizer/data/store.dart';
 import 'package:spend_utilizer/models/models.dart';
 import 'package:spend_utilizer/services/chat_engine.dart';
 import 'package:spend_utilizer/services/excel_export.dart';
+import 'package:spend_utilizer/util/period.dart';
+import 'package:spend_utilizer/services/sms_parser.dart';
 import 'package:spend_utilizer/util/format.dart';
 
 const hdfcCard1 =
@@ -189,7 +191,7 @@ void main() {
     final s = await newStore();
     s.addFromSms(hdfcCard1);
     s.addFromSms(sbiSavings);
-    final bytes = ExcelExporter.build(s, const ExportRange('All time', null));
+    final bytes = ExcelExporter.build(s, Period.allTime(DateTime.now()));
     final x = Excel.decodeBytes(bytes);
     expect(
       x.tables.keys,
@@ -274,5 +276,143 @@ void main() {
     expect(s.txns.single.category, 'Payees');
     expect(s.accountById('c')!.isMine, isTrue);
     expect(s.accountById('h')!.ownership, Ownership.pending);
+  });
+
+  group('SIP & Mutual Funds', () {
+    const sips = [
+      'Rs.5,000.00 debited from A/c XX1234 on 05-11-26 ACH D- BSE LIMITED '
+          '-SBI',
+      'Your A/c XX1234 debited for INR 2,000 on 05-11-26 towards NACH Dr '
+          'ICCL ZERODHA COIN. -HDFC',
+      'Rs 1,500 debited from A/c XX1234 on 05-11-26 for SIP in Parag Parikh '
+          'Flexi Cap Fund. -Axis',
+      'INR 3,000 debited from A/c XX1234 on 05-11-26 to VPA groww.mf@yesbank '
+          '(UPI Ref No 612345600001) -ICICI',
+      'Rs.2,500 debited from a/c XX1234 on 05-11-26 HDFC Mutual Fund '
+          'auto debit -SBI',
+    ];
+
+    test('SIP debits are recognised', () {
+      for (final sms in sips) {
+        expect(
+          SmsParser.parse(sms)!.category,
+          'SIP & Mutual Funds',
+          reason: sms,
+        );
+      }
+      // An ordinary EMI auto-debit stays an EMI.
+      expect(
+        SmsParser.parse(
+          'Rs.8,000 debited from A/c XX1234 on 05-11-26 '
+          'NACH Dr BAJAJ FINSERV EMI -SBI',
+        )!.category,
+        'EMI & Loans',
+      );
+    });
+
+    test('SIPs count as Invested, not Spent', () async {
+      final s = await newStore();
+      for (final sms in sips) {
+        s.addFromSms(sms);
+      }
+      s.addFromSms(
+        'Rs.500 debited from A/c XX1234 on 05-11-26 to VPA '
+        'swiggy@axisbank (UPI Ref No 512345678999) -SBI',
+      );
+      s.addFromSms(
+        'Your A/c XX1234 is credited with Rs.50,000 on 01-11-26 '
+        'by NEFT-SAL ACME -SBI',
+      );
+      final nov = DateTime(2026, 11);
+      expect(s.spentIn(nov), 500);
+      expect(s.investedIn(nov), 14000);
+      expect(s.sipsInYear(2026).length, 5);
+      expect(s.sipsInYear(2026).map(s.sipFundName).toSet(), {
+        'BSE StAR MF',
+        'Zerodha Coin',
+        'Parag Parikh MF',
+        'Groww',
+        'HDFC MF',
+      });
+      // Per-account "spent" leaves SIPs out too.
+      expect(s.accountSpentIn(s.accounts.first, nov), 500);
+      expect(s.categoryTotals(nov, TxnType.debit).map((c) => c.category), [
+        'Food & Dining',
+      ]);
+    });
+  });
+
+  group('FD, RD, stocks and bonds', () {
+    const samples = {
+      'Rs.50,000.00 debited from A/c XX1234 on 05-11-26 towards Fixed '
+              'Deposit booking FD No 1234567. -SBI':
+          'Fixed Deposit',
+      'INR 1,00,000 debited from A/c XX1234 on 05-11-26 for new FD opened '
+              'online. -HDFC':
+          'Fixed Deposit',
+      'Rs 2,000 debited from A/c XX1234 on 05-11-26 towards RD instalment '
+              'RD A/c XX9876. -SBI':
+          'Recurring Deposit',
+      'Rs.25,000 debited from A/c XX1234 on 05-11-26 to ZERODHA BROKING '
+              'LTD funds transfer -ICICI':
+          'Stocks',
+      'Rs 10,000 debited from A/c XX1234 on 05-11-26 to VPA '
+              'upstox@hdfcbank (UPI Ref No 612345600002) -SBI':
+          'Stocks',
+      'Rs.15,000 debited from A/c XX1234 on 05-11-26 for Sovereign Gold '
+              'Bond SGB 2026-27 -SBI':
+          'Gold & Silver',
+      'Rs 20,000 debited from A/c XX1234 on 05-11-26 to RBI RETAIL DIRECT '
+              'T-Bill purchase -HDFC':
+          'Bonds',
+      'Rs.5,000 debited from A/c XX1234 on 05-11-26 towards NPS '
+              'contribution -SBI':
+          'NPS',
+      'Rs.3,000 debited from A/c XX1234 on 05-11-26 ACH D- BSE LIMITED '
+              '-SBI':
+          'SIP & Mutual Funds',
+    };
+
+    test('each investment type is recognised', () {
+      samples.forEach((sms, category) {
+        expect(SmsParser.parse(sms)!.category, category, reason: sms);
+      });
+      // Look-alikes stay where they belong.
+      expect(
+        SmsParser.parse(
+          'Spent Rs.500 On HDFC Bank Credit Card xx1111 At '
+          'BIGBASKET On 2026-11-04:10:00:00',
+        )!.category,
+        'Groceries',
+      );
+      expect(
+        SmsParser.parse(
+          'Rs.300 debited from A/c XX1234 on 03-11-26 '
+          'to VPA cardshop@ybl (UPI Ref 612345600003) -SBI',
+        )!.category,
+        isNot('Recurring Deposit'),
+      );
+    });
+
+    test('FD maturity is an investment return', () {
+      expect(
+        SmsParser.parse(
+          'Your A/c XX1234 is credited with Rs.52,500 on '
+          '05-11-26 towards FD closure on maturity -SBI',
+        )!.category,
+        'Investment Returns',
+      );
+    });
+
+    test('all of them count as Invested, none as Spent', () async {
+      final s = await newStore();
+      for (final sms in samples.keys) {
+        s.addFromSms(sms);
+      }
+      final nov = DateTime(2026, 11);
+      expect(s.spentIn(nov), 0);
+      expect(s.investedIn(nov), 230000);
+      expect(s.investmentsInYear(2026).length, samples.length);
+    });
   });
 }

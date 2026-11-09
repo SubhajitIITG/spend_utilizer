@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config.dart';
 import 'data/store.dart';
 import 'services/auth_service.dart';
+import 'services/share_inbox.dart';
 import 'services/supabase_backend.dart';
 import 'services/sync_service.dart';
 import 'ui/accounts_screen.dart';
@@ -40,7 +41,16 @@ class SpendUtilizerApp extends StatefulWidget {
   /// Null when cloud login/sync is not configured (offline-only mode).
   final AuthService? auth;
 
-  const SpendUtilizerApp({super.key, required this.store, this.auth});
+  /// Receives payment screenshots / SMS shared from other apps. Tests pass
+  /// their own; the app creates one that listens to Android's share sheet.
+  final ShareInbox? shares;
+
+  const SpendUtilizerApp({
+    super.key,
+    required this.store,
+    this.auth,
+    this.shares,
+  });
 
   @override
   State<SpendUtilizerApp> createState() => _SpendUtilizerAppState();
@@ -48,6 +58,7 @@ class SpendUtilizerApp extends StatefulWidget {
 
 class _SpendUtilizerAppState extends State<SpendUtilizerApp> {
   late final SyncService _sync = SyncService(widget.store);
+  late final ShareInbox _shares = widget.shares ?? (ShareInbox()..start());
   String? _syncingFor;
 
   @override
@@ -84,6 +95,7 @@ class _SpendUtilizerAppState extends State<SpendUtilizerApp> {
         ChangeNotifierProvider.value(value: widget.store),
         ChangeNotifierProvider.value(value: _sync),
         ChangeNotifierProvider<AuthService?>.value(value: auth),
+        ChangeNotifierProvider.value(value: _shares),
       ],
       child: MaterialApp(
         title: 'Spend Utilizer',
@@ -122,6 +134,12 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
+    // Something was shared to the app: show the chat, which handles it.
+    if (context.watch<ShareInbox>().hasPending && _index != 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _index = 0);
+      });
+    }
     if (!store.loaded) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }

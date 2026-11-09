@@ -9,6 +9,7 @@ import '../models/models.dart';
 import '../services/categories.dart';
 import '../services/sms_parser.dart';
 import '../services/sync_types.dart';
+import '../util/period.dart';
 
 /// Where the JSON data lives. Swappable so tests can use memory.
 abstract class Storage {
@@ -439,6 +440,13 @@ class AppStore extends ChangeNotifier {
   bool _isDuplicate(ParsedSms p, String raw) {
     final norm = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
     for (final t in txns) {
+      // Same payment already added from a screenshot.
+      if (t.source == 'screenshot' &&
+          p.refNo.isNotEmpty &&
+          t.refNo == p.refNo &&
+          t.amount == p.amount) {
+        return true;
+      }
       if (t.source != 'sms') continue;
       if (p.refNo.isNotEmpty && t.refNo == p.refNo && t.amount == p.amount) {
         return true;
@@ -454,6 +462,7 @@ class AppStore extends ChangeNotifier {
     final p = SmsParser.parse(raw);
     if (p == null) return const SmsResult(SmsStatus.notTransaction);
     if (_isDuplicate(p, raw)) return const SmsResult(SmsStatus.duplicate);
+    if (p.isFundSms) return _addFundSms(p, raw);
     final (found, isNew) = findOrCreateAccount(p.bank, p.accountType, p.last4);
     // The user said this account isn't theirs: don't attach payments to it.
     final account = found.ownership == Ownership.notMine ? null : found;
@@ -462,6 +471,24 @@ class AppStore extends ChangeNotifier {
     final category = p.type == TxnType.debit && (rule?.decided ?? false)
         ? rule!.category
         : p.category;
+    // The same SIP may already be in from the fund house's SMS or a Groww
+    // screenshot: link this account to it instead of counting it twice.
+    if (p.type == TxnType.debit && investmentCategories.contains(category)) {
+      final same = findSameInvestment(
+        p.amount,
+        p.date,
+        p.counterparty,
+        unlinkedOnly: true,
+      );
+      if (same != null) {
+        if (account != null) {
+          same.accountId = account.id;
+          _touchTxn(same);
+          _changed();
+        }
+        return SmsResult(SmsStatus.duplicate, txn: same);
+      }
+    }
     final t = Txn(
       id: newId(),
       type: p.type,
@@ -486,6 +513,187 @@ class AppStore extends ChangeNotifier {
       newAccount: isNew,
       dateFound: p.dateFound,
     );
+  }
+
+  SmsResult _addFundSms(ParsedSms p, String raw) {
+    final same = findSameInvestment(p.amount, p.date, p.counterparty);
+    if (same != null) {
+      _improveInvestment(same, p.counterparty, p.note);
+      return SmsResult(SmsStatus.duplicate, txn: same);
+    }
+    final t = Txn(
+      id: newId(),
+      type: TxnType.debit,
+      amount: p.amount,
+      category: p.category,
+      counterparty: p.counterparty,
+      note: p.note,
+      date: p.date,
+      source: 'sms',
+      rawMessage: raw.trim(),
+    );
+    txns.add(t);
+    _touchTxn(t);
+    _changed();
+    return SmsResult(SmsStatus.added, txn: t, dateFound: p.dateFound);
+  }
+
+  /// An investment already recorded that is the same one as [amount] on
+  /// [date] in [fund]: the bank's auto-debit, the fund house's SMS and a
+  /// Groww screenshot all describe one SIP instalment. Amounts may differ
+  /// by stamp duty (₹2,000 → ₹1,999.90) and dates by a few days.
+  ///
+  /// With [unlinkedOnly] (a bank debit), only investments not yet tied to
+  /// an account match, so three ₹2,000 SIPs on one day stay three.
+  Txn? findSameInvestment(
+    double amount,
+    DateTime date,
+    String fund, {
+    bool unlinkedOnly = false,
+  }) {
+    final key = fundKey(fund);
+    Txn? best;
+    var bestGap = 1 << 30;
+    for (final t in txns) {
+      if (!isInvestment(t)) continue;
+      if (unlinkedOnly && t.accountId != null) continue;
+      final tolerance = amount * 0.001 < 1 ? 1 : amount * 0.001;
+      if ((t.amount - amount).abs() > tolerance) continue;
+      final gap = t.date.difference(date).inHours.abs();
+      if (gap > 7 * 24) continue;
+      final other = fundKey(t.counterparty);
+      // Two different named funds are two different investments.
+      if (!_sameFund(key, other)) continue;
+      if (gap < bestGap) {
+        best = t;
+        bestGap = gap;
+      }
+    }
+    return best;
+  }
+
+  static bool _sameFund(String a, String b) =>
+      a.isEmpty ||
+      b.isEmpty ||
+      a == b ||
+      a.startsWith('$b ') ||
+      b.startsWith('$a ');
+
+  /// First three words of a fund's name ("axis small cap"), just the fund house
+  /// for "UTI MF" ("uti"), or '' if [name] doesn't name a fund (e.g. "BSE
+  /// LIMITED" on a bank debit).
+  static String fundKey(String name) {
+    final lower = name.toLowerCase().trim();
+    final house = RegExp(r'^([a-z]+)\s+(mf|mutual fund)$').firstMatch(lower);
+    if (house != null) return house.group(1)!;
+    if (!RegExp(r'\b(fund|fof|etf|index|cap|flexi|plan)\b').hasMatch(lower)) {
+      return '';
+    }
+    final words = lower
+        .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
+        .split(' ')
+        .where((w) => w.isNotEmpty)
+        .toList();
+    if (words.length < 2) return '';
+    return words.take(3).join(' ');
+  }
+
+  /// Gives a matched investment the fund's name and details when it only
+  /// had the bank's ("BSE LIMITED", "ACH D-…").
+  void _improveInvestment(Txn t, String fund, String note) {
+    var changed = false;
+    if (fund.isNotEmpty &&
+        fundKey(fund).isNotEmpty &&
+        fundKey(t.counterparty).isEmpty) {
+      t.counterparty = fund;
+      changed = true;
+    }
+    if (note.isNotEmpty && t.note.isEmpty) {
+      t.note = note;
+      changed = true;
+    }
+    if (changed) {
+      _touchTxn(t);
+      _changed();
+    }
+  }
+
+  /// Adds investments read from an order list (e.g. Groww's Mutual Funds
+  /// orders). Returns how many were new; ones already recorded are
+  /// matched and given the fund's name instead.
+  (int added, int matched) addInvestments(
+    List<({double amount, DateTime date, String fund, String note})> items, {
+    String rawText = '',
+  }) {
+    var added = 0, matched = 0;
+    for (final i in items) {
+      final same = findSameInvestment(i.amount, i.date, i.fund);
+      if (same != null) {
+        _improveInvestment(same, i.fund, i.note);
+        matched++;
+        continue;
+      }
+      final t = Txn(
+        id: newId(),
+        type: TxnType.debit,
+        amount: i.amount,
+        category: sipCategory,
+        counterparty: i.fund,
+        note: i.note,
+        date: i.date,
+        source: 'screenshot',
+        rawMessage: rawText,
+      );
+      txns.add(t);
+      _touchTxn(t);
+      added++;
+    }
+    if (added > 0) _changed();
+    return (added, matched);
+  }
+
+  /// Records a payment read from a screenshot (see screenshot_parser).
+  Txn addFromScreenshot({
+    required bool received,
+    required double amount,
+    required String counterparty,
+    required DateTime date,
+    required String refNo,
+    required String bank,
+    required String last4,
+    AccountType accountType = AccountType.savings,
+    required String category,
+    required String rawText,
+  }) {
+    Account? account;
+    if (last4.isNotEmpty && bank != 'Unknown Bank') {
+      final (found, _) = findOrCreateAccount(bank, accountType, last4);
+      account = found.ownership == Ownership.notMine ? null : found;
+    } else if (last4.isNotEmpty) {
+      // Bank not shown (e.g. only a logo): use the user's account with
+      // these last digits, if there's exactly one.
+      final matches = selectableAccounts.where((a) => a.last4 == last4);
+      if (matches.length == 1) account = matches.first;
+    }
+    final rule = merchants[merchantKey(counterparty)];
+    final t = Txn(
+      id: newId(),
+      type: received ? TxnType.credit : TxnType.debit,
+      amount: amount,
+      category: !received && (rule?.decided ?? false)
+          ? rule!.category
+          : category,
+      accountId: account?.id,
+      counterparty: counterparty,
+      date: date,
+      source: 'screenshot',
+      rawMessage: rawText,
+      refNo: refNo,
+    );
+    txns.add(t);
+    _touchTxn(t);
+    _changed();
+    return t;
   }
 
   // -------------------------------------------------------------- merchants
@@ -826,25 +1034,51 @@ class AppStore extends ChangeNotifier {
 
   // ----------------------------------------------------------------- stats
 
-  bool _inMonth(DateTime d, DateTime month) =>
-      d.year == month.year && d.month == month.month;
+  // Totals work on any [Period]; the month versions are shortcuts.
 
-  Iterable<Txn> txnsInMonth(DateTime month) =>
-      txns.where((t) => _inMonth(t.date, month));
+  Iterable<Txn> txnsIn(Period p) => txns.where((t) => p.contains(t.date));
 
-  double spentIn(DateTime month) =>
-      txnsInMonth(month)
-          .where((t) => t.type == TxnType.debit)
-          .fold(0.0, (s, t) => s + t.amount);
+  Iterable<Txn> txnsInMonth(DateTime month) => txnsIn(Period.month(month));
 
-  double receivedIn(DateTime month) =>
-      txnsInMonth(month)
-          .where((t) => t.type == TxnType.credit)
-          .fold(0.0, (s, t) => s + t.amount);
+  /// Whether a debit counts as spending. Card-bill payments don't (the
+  /// purchases were counted on the card) and neither do SIPs/investments
+  /// (that money is saved; see [investedDuring]).
+  static bool isSpending(Txn t) =>
+      t.type == TxnType.debit &&
+      t.category != cardBillCategory &&
+      !investmentCategories.contains(t.category);
 
-  List<CategoryTotal> categoryTotals(DateTime month, TxnType type) {
+  static bool isInvestment(Txn t) =>
+      t.type == TxnType.debit && investmentCategories.contains(t.category);
+
+  static double _sum(Iterable<Txn> ts) => ts.fold(0.0, (s, t) => s + t.amount);
+
+  double spentDuring(Period p) => _sum(txnsIn(p).where(isSpending));
+  double receivedDuring(Period p) =>
+      _sum(txnsIn(p).where((t) => t.type == TxnType.credit));
+  double investedDuring(Period p) => _sum(txnsIn(p).where(isInvestment));
+
+  double spentIn(DateTime month) => spentDuring(Period.month(month));
+  double receivedIn(DateTime month) => receivedDuring(Period.month(month));
+  double investedIn(DateTime month) => investedDuring(Period.month(month));
+
+  /// Investments (SIP, FD, RD, stocks, bonds, other) in [p], newest first.
+  List<Txn> investmentsDuring(Period p) =>
+      txnsIn(p).where(isInvestment).toList()
+        ..sort((a, b) => b.date.compareTo(a.date));
+
+  List<Txn> investmentsInYear(int year) =>
+      investmentsDuring(Period.custom(DateTime(year), DateTime(year, 12, 31)));
+
+  /// SIP payments in [year], newest first.
+  List<Txn> sipsInYear(int year) =>
+      investmentsInYear(year).where((t) => t.category == sipCategory).toList();
+
+  List<CategoryTotal> categoryTotalsDuring(Period p, TxnType type) {
     final map = <String, double>{};
-    for (final t in txnsInMonth(month).where((t) => t.type == type)) {
+    for (final t in txnsIn(p).where((t) => t.type == type)) {
+      // Card bills and investments aren't spending.
+      if (type == TxnType.debit && !isSpending(t)) continue;
       map[t.category] = (map[t.category] ?? 0) + t.amount;
     }
     final list = map.entries.map((e) => CategoryTotal(e.key, e.value)).toList();
@@ -852,10 +1086,69 @@ class AppStore extends ChangeNotifier {
     return list;
   }
 
+  List<CategoryTotal> categoryTotals(DateTime month, TxnType type) =>
+      categoryTotalsDuring(Period.month(month), type);
+
+  double accountSpentDuring(Account a, Period p) =>
+      _sum(txnsIn(p).where((t) => t.accountId == a.id && isSpending(t)));
+
   double accountSpentIn(Account a, DateTime month) =>
-      txnsInMonth(month)
-          .where((t) => t.accountId == a.id && t.type == TxnType.debit)
-          .fold(0.0, (s, t) => s + t.amount);
+      accountSpentDuring(a, Period.month(month));
+
+  static const _fundNames = {
+    'parag parikh': 'Parag Parikh MF',
+    'ppfas': 'Parag Parikh MF',
+    'zerodha coin': 'Zerodha Coin',
+    'coin by zerodha': 'Zerodha Coin',
+    'iccl': 'Zerodha Coin',
+    'bse star': 'BSE StAR MF',
+    'bsestarmf': 'BSE StAR MF',
+    'bse limited': 'BSE StAR MF',
+    'bse ltd': 'BSE StAR MF',
+    'groww': 'Groww',
+    'kuvera': 'Kuvera',
+    'paytm money': 'Paytm Money',
+    'et money': 'ET Money',
+    'etmoney': 'ET Money',
+    'scripbox': 'Scripbox',
+    'sbi mf': 'SBI MF',
+    'sbi mutual': 'SBI MF',
+    'hdfc mf': 'HDFC MF',
+    'hdfc mutual': 'HDFC MF',
+    'icici pru': 'ICICI Prudential MF',
+    'axis mf': 'Axis MF',
+    'axis mutual': 'Axis MF',
+    'nippon': 'Nippon India MF',
+    'mirae': 'Mirae Asset MF',
+    'kotak mf': 'Kotak MF',
+    'kotak mutual': 'Kotak MF',
+    'uti mf': 'UTI MF',
+    'uti mutual': 'UTI MF',
+    'quant mf': 'Quant MF',
+    'aditya birla sun life': 'Aditya Birla Sun Life MF',
+    'dsp mf': 'DSP MF',
+    'tata mf': 'Tata MF',
+    'franklin templeton': 'Franklin Templeton MF',
+    'motilal oswal': 'Motilal Oswal MF',
+    'edelweiss': 'Edelweiss MF',
+    'canara robeco': 'Canara Robeco MF',
+    'sundaram': 'Sundaram MF',
+    'invesco': 'Invesco MF',
+    'bandhan': 'Bandhan MF',
+    'cams': 'CAMS',
+    'kfin': 'KFintech',
+  };
+
+  /// A readable name for a SIP's fund or platform, for grouping.
+  String sipFundName(Txn t) {
+    final alias = merchantRule(t.counterparty)?.alias ?? '';
+    if (alias.isNotEmpty) return alias;
+    final text = '${t.counterparty} ${t.rawMessage} ${t.note}'.toLowerCase();
+    for (final e in _fundNames.entries) {
+      if (text.contains(e.key)) return e.value;
+    }
+    return t.counterparty.trim().isEmpty ? 'Other SIPs' : t.counterparty;
+  }
 
   /// Outstanding lend/borrow per person (case-insensitive names).
   List<PersonBalance> personBalances() {

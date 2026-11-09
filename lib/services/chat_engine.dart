@@ -10,6 +10,8 @@ import '../data/store.dart';
 import '../models/models.dart';
 import '../util/format.dart';
 import 'categories.dart';
+import 'fund_orders_parser.dart';
+import 'screenshot_parser.dart';
 import 'sms_parser.dart';
 
 enum ChatFlow {
@@ -20,11 +22,17 @@ enum ChatFlow {
   borrow,
   reminder,
 
+  /// Money put into a SIP, FD, stocks, PPF, gold…
+  invest,
+
   /// Bot-initiated: "you pay X regularly, what is it?"
   merchant,
 
   /// Bot-initiated: "is this account / card yours?"
   ownership,
+
+  /// "Add this payment from the screenshot?"
+  screenshot,
 }
 
 enum InputKind { text, amount, date }
@@ -37,8 +45,10 @@ extension ChatFlowX on ChatFlow {
     ChatFlow.lend => 'Lend',
     ChatFlow.borrow => 'Borrow',
     ChatFlow.reminder => 'Reminder',
+    ChatFlow.invest => 'Invest',
     ChatFlow.merchant => 'Regular payment',
     ChatFlow.ownership => 'Account check',
+    ChatFlow.screenshot => 'Screenshot',
   };
   String get emoji => switch (this) {
     ChatFlow.none => '📋',
@@ -47,8 +57,10 @@ extension ChatFlowX on ChatFlow {
     ChatFlow.lend => '🤝',
     ChatFlow.borrow => '🙏',
     ChatFlow.reminder => '⏰',
+    ChatFlow.invest => '💹',
     ChatFlow.merchant => '🔎',
     ChatFlow.ownership => '🏦',
+    ChatFlow.screenshot => '📷',
   };
 }
 
@@ -63,6 +75,7 @@ enum _Step {
   title,
   merchantKind,
   merchantName,
+  investName,
   done,
 }
 
@@ -72,6 +85,8 @@ const cashOption = 'Cash';
 const personOption = '👤 A friend / person';
 const askLaterOption = 'Ask me later';
 const neverAskOption = 'Don\'t ask again';
+const addShotOption = '✅ Add it';
+const skipShotOption = '❌ Don\'t add';
 const mineOption = '✅ Yes, it\'s mine';
 const notMineOption = '❌ No, someone else\'s';
 
@@ -94,6 +109,9 @@ class ChatEngine {
   DateTime? _when;
   MerchantSuggestion? _merchant;
   Account? _pendingAccount;
+  ParsedScreenshot? _shot;
+  List<FundOrder> _orders = [];
+  String _ordersText = '';
   bool _merchantIsPerson = false;
 
   /// Maps the account option labels shown to the user to account ids.
@@ -114,6 +132,7 @@ class ChatEngine {
   String get inputHint {
     if (!active) return 'Paste bank message(s) here…';
     if (flow == ChatFlow.ownership) return 'Tap Yes or No below';
+    if (flow == ChatFlow.screenshot) return 'Add this payment?';
     return switch (_step) {
       _Step.amount => 'Enter amount, e.g. 450',
       _Step.category => 'Pick a category or type one',
@@ -125,6 +144,7 @@ class ChatEngine {
       _Step.title => 'What should I remind you about?',
       _Step.merchantKind => 'Pick what this is, or type a category',
       _Step.merchantName => 'e.g. Raju Tea Stall (optional)',
+      _Step.investName => 'e.g. Axis Small Cap Fund, SBI FD (optional)',
       _Step.done => '',
     };
   }
@@ -135,11 +155,16 @@ class ChatEngine {
     if (flow == ChatFlow.ownership) {
       return const [mineOption, notMineOption, cancelOption];
     }
+    if (flow == ChatFlow.screenshot) {
+      return const [addShotOption, skipShotOption];
+    }
     final List<String> opts = switch (_step) {
-      _Step.category =>
-        (flow == ChatFlow.credit ? creditCategories : debitCategories)
-            .map((c) => '${c.emoji} ${c.name}')
-            .toList(),
+      _Step.category => switch (flow) {
+        ChatFlow.credit => creditCategories,
+        ChatFlow.invest => investmentTypes,
+        _ => spendingCategories,
+      }.map((c) => '${c.emoji} ${investmentLabel(c.name)}').toList(),
+      _Step.investName => [..._knownInvestments(), skipOption],
       _Step.account => [..._accountOptions.keys, skipOption],
       _Step.dueDate =>
         flow == ChatFlow.reminder
@@ -164,6 +189,19 @@ class ChatEngine {
       _ => <String>[],
     };
     return [...opts, cancelOption];
+  }
+
+  /// Names used before for this kind of investment, newest first.
+  List<String> _knownInvestments() {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final t in store.txns.reversed) {
+      if (t.category != _category || !AppStore.isInvestment(t)) continue;
+      final n = t.counterparty.trim();
+      if (n.isNotEmpty && seen.add(n.toLowerCase())) out.add(n);
+      if (out.length >= 5) break;
+    }
+    return out;
   }
 
   List<String> _knownPeople() {
@@ -216,8 +254,17 @@ class ChatEngine {
         _Step.note,
       ],
       ChatFlow.reminder => [_Step.title, _Step.amount, _Step.dueDate],
+      ChatFlow.invest => [
+        _Step.category,
+        _Step.investName,
+        _Step.amount,
+        _Step.txnDate,
+        _Step.account,
+        _Step.note,
+      ],
       ChatFlow.merchant => [_Step.merchantKind, _Step.merchantName],
       ChatFlow.ownership => [],
+      ChatFlow.screenshot => [],
       ChatFlow.none => [],
     };
     if (_steps.isEmpty) return [];
@@ -265,6 +312,200 @@ class ChatEngine {
     }
   }
 
+  /// Handles the text read from a payment screenshot: shows what was read
+  /// and the authenticity checks, then asks whether to add it.
+  List<ChatMessage> handleScreenshot(String ocrText, {DateTime? now}) {
+    _reset();
+    final orders = FundOrdersParser.parse(ocrText, now: now);
+    if (orders.isNotEmpty) return _showOrders(orders, ocrText);
+    final p = ScreenshotParser.parse(ocrText, now: now);
+    if (p == null) {
+      final read = ocrText.trim();
+      if (read.isEmpty) {
+        return [
+          _bot(
+            '📷 I couldn\'t find any text in this image. Use the payment\'s '
+            'success screen from Google Pay, PhonePe, Paytm, BHIM or your '
+            'bank app, as a normal (not cropped too tightly) screenshot.',
+          ),
+        ];
+      }
+      // Show what was read, so a missed layout can be reported and fixed.
+      final shown = read.split('\n').take(25).join('\n');
+      return [
+        _bot(
+          '📷 I read text in this image but couldn\'t find the payment '
+          'amount. This is what I could read:\n\n$shown\n\nIf this is a '
+          'payment screenshot, please send this message to the developer.',
+        ),
+      ];
+    }
+    final r = ScreenshotChecker.check(p, store, now: now);
+    final who = p.who.isEmpty
+        ? ''
+        : (p.received ? ' from ${p.who}' : ' to ${p.who}');
+    final buf = StringBuffer()
+      ..writeln('📷 Read from a ${p.app.label} screenshot:')
+      ..writeln(
+        '${p.received ? '➕ Received' : '➖ Paid'} ${money(p.amount)}$who',
+      );
+    if (p.date != null) {
+      buf.writeln(
+        '📅 ${p.hasTime ? formatTxnDate(p.date!) : formatDate(p.date!)}',
+      );
+    }
+    if (p.utr.isNotEmpty) buf.writeln('🔖 UPI ref ${p.utr}');
+    buf.writeln();
+    for (final c in r.checks) {
+      buf.writeln('${c.icon} ${c.text}');
+    }
+    buf
+      ..writeln()
+      ..write(r.verdictText);
+
+    if (r.alreadyRecorded != null) {
+      buf.write(
+        '\n\nThis payment is already in your records, so I didn\'t '
+        'add it again.',
+      );
+      return [_bot(buf.toString())];
+    }
+    if (p.status == PaymentStatus.failed) {
+      buf.write('\n\nI didn\'t add it because the payment failed.');
+      return [_bot(buf.toString())];
+    }
+    flow = ChatFlow.screenshot;
+    _shot = p;
+    buf.write('\n\nAdd it as a ${p.received ? 'credit' : 'debit'}?');
+    return [_bot(buf.toString())];
+  }
+
+  /// A list of mutual fund orders (Groww's Orders screen): show them and
+  /// offer to add the completed ones as investments.
+  List<ChatMessage> _showOrders(List<FundOrder> orders, String rawText) {
+    final done = orders
+        .where(
+          (o) =>
+              o.status != OrderStatus.inProgress &&
+              o.status != OrderStatus.failed,
+        )
+        .toList();
+    final buf = StringBuffer(
+      '📷 I read ${orders.length} mutual fund order'
+      '${orders.length == 1 ? '' : 's'}:\n',
+    );
+    for (final o in orders) {
+      final mark = switch (o.status) {
+        OrderStatus.completed => '✅',
+        OrderStatus.inProgress => '⏳',
+        OrderStatus.failed => '❌',
+        OrderStatus.unknown => '•',
+      };
+      buf.writeln(
+        '$mark ${o.fund} · ${money(o.amount)}'
+        '${o.amountGuessed ? ' ⚠️' : ''}'
+        '${o.date == null ? '' : ' · ${formatDate(o.date!)}'}'
+        ' · ${o.isSip ? 'SIP' : o.kind}',
+      );
+    }
+    if (orders.any((o) => o.amountGuessed)) {
+      buf.writeln(
+        '\n⚠️ The ₹ sign wasn\'t clear on some amounts. Please check them.',
+      );
+    }
+    final pending = orders.length - done.length;
+    if (pending > 0) {
+      buf.writeln(
+        '\n⏳ $pending order${pending == 1 ? ' is' : 's are'} in progress or '
+        'failed, so I\'ll leave ${pending == 1 ? 'it' : 'them'} out. Share '
+        'the screenshot again once ${pending == 1 ? 'it\'s' : 'they\'re'} '
+        'completed.',
+      );
+    }
+    if (done.isEmpty) return [_bot(buf.toString().trim())];
+    flow = ChatFlow.screenshot;
+    _orders = done;
+    _ordersText = rawText;
+    buf.write(
+      '\nAdd ${done.length == 1 ? 'it' : 'the ${done.length} completed ones'} '
+      'to 📈 $sipCategory? Ones already recorded from SMS won\'t be added '
+      'twice.',
+    );
+    return [_bot(buf.toString().trim())];
+  }
+
+  List<ChatMessage> _answerScreenshot(String text) {
+    if (text == skipShotOption ||
+        RegExp(r'^no\b', caseSensitive: false).hasMatch(text)) {
+      _reset();
+      return [_bot('Okay, I didn\'t add it.')];
+    }
+    if (text != addShotOption &&
+        !RegExp(r'^(yes|add)\b', caseSensitive: false).hasMatch(text)) {
+      return [_bot('Tap "Add it" or "Don\'t add".')];
+    }
+    if (_orders.isNotEmpty) {
+      final now = DateTime.now();
+      final (added, matched) = store.addInvestments([
+        for (final o in _orders)
+          (
+            amount: o.amount,
+            date: o.date ?? now,
+            fund: o.fund,
+            note: o.isSip ? 'SIP instalment' : o.kind,
+          ),
+      ], rawText: _ordersText);
+      _reset();
+      return [
+        _bot(
+          [
+            if (added > 0)
+              '📈 Added $added investment${added == 1 ? '' : 's'} to '
+                  '$sipCategory.',
+            if (matched > 0)
+              '♻️ $matched ${matched == 1 ? 'was' : 'were'} already recorded '
+                  '(from SMS); I added the fund name to '
+                  '${matched == 1 ? 'it' : 'them'}.',
+            if (added == 0 && matched == 0) 'Nothing new to add.',
+          ].join('\n'),
+        ),
+      ];
+    }
+    final p = _shot!;
+    // Prefer the category the payment app itself shows (slice, Paytm…).
+    final category = p.received
+        ? 'Transfer'
+        : p.appCategory.isNotEmpty
+        ? p.appCategory
+        : guessCategory(isCredit: false, merchant: p.who, message: p.rawText);
+    final t = store.addFromScreenshot(
+      received: p.received,
+      amount: p.amount,
+      counterparty: p.who,
+      date: p.date ?? DateTime.now(),
+      refNo: p.utr,
+      bank: p.bank,
+      last4: p.last4,
+      accountType: p.accountType,
+      category: category,
+      rawText: p.rawText,
+    );
+    _reset();
+    return [_bot(describeTxn(store, t), txnId: t.id), ..._maybeAskNext()];
+  }
+
+  /// The phone's text reader failed (e.g. the image couldn't be opened).
+  List<ChatMessage> screenshotError(Object error) {
+    _reset();
+    return [
+      _bot(
+        '📷 I couldn\'t read this image: $error\n\nPlease try another '
+        'screenshot, and send this message to the developer if it keeps '
+        'happening.',
+      ),
+    ];
+  }
+
   /// Asks whether a newly found account/card belongs to the user.
   List<ChatMessage> reviewAccount(Account a) {
     _reset();
@@ -310,6 +551,7 @@ class ChatEngine {
       _reset();
       return [_bot('Cancelled. Paste a bank message or pick an option below.')];
     }
+    if (flow == ChatFlow.screenshot) return _answerScreenshot(text);
     if (flow == ChatFlow.ownership) {
       final a = _pendingAccount!;
       final yes =
@@ -379,6 +621,9 @@ class ChatEngine {
     _when = null;
     _merchant = null;
     _pendingAccount = null;
+    _shot = null;
+    _orders = [];
+    _ordersText = '';
     _merchantIsPerson = false;
     _accountOptions.clear();
   }
@@ -400,24 +645,37 @@ class ChatEngine {
           ChatFlow.lend => 'How much did you lend to $_person?',
           ChatFlow.borrow => 'How much did you borrow from $_person?',
           ChatFlow.reminder => 'Amount involved? (tap Skip if none)',
-          ChatFlow.merchant || ChatFlow.ownership || ChatFlow.none => '',
+          ChatFlow.invest => 'How much did you invest? 💰',
+          ChatFlow.merchant ||
+          ChatFlow.ownership ||
+          ChatFlow.screenshot ||
+          ChatFlow.none => '',
         };
       case _Step.txnDate:
         return switch (flow) {
           ChatFlow.credit => 'When did you receive it? 📅',
           ChatFlow.lend => 'When did you lend it? 📅',
           ChatFlow.borrow => 'When did you borrow it? 📅',
+          ChatFlow.invest => 'When did you invest it? 📅',
           _ => 'When did you spend it? 📅',
         };
       case _Step.category:
-        return flow == ChatFlow.credit
-            ? 'What kind of money is this?'
-            : 'Where did you spend it?';
+        return switch (flow) {
+          ChatFlow.credit => 'What kind of money is this?',
+          ChatFlow.invest => 'What did you invest in? 💹',
+          _ =>
+            'Where did you spend it?\n(For SIPs, FDs, stocks and other '
+                'investments, use the 💹 Invest button.)',
+        };
+      case _Step.investName:
+        return 'Which ${investmentLabel(_category!).toLowerCase()}? e.g. '
+            '${_investExample(_category!)} (optional)';
       case _Step.account:
         _buildAccountOptions();
         return switch (flow) {
           ChatFlow.credit => 'Which account received it?',
           ChatFlow.borrow => 'Which account did the money come into?',
+          ChatFlow.invest => 'Paid from which account?',
           _ => 'Paid from which account or card?',
         };
       case _Step.person:
@@ -455,6 +713,25 @@ class ChatEngine {
     }
   }
 
+  static String _investExample(String category) => switch (category) {
+    sipCategory => '"Axis Small Cap Fund"',
+    stocksCategory => '"Reliance, 10 shares"',
+    fdCategory => '"SBI FD, 1 year"',
+    rdCategory => '"Post Office RD"',
+    ppfCategory => '"PPF at SBI"',
+    epfCategory => '"VPF contribution"',
+    npsCategory => '"NPS Tier 1"',
+    goldCategory => '"Digital gold" or "SGB 2026"',
+    bondsCategory => '"RBI Floating Rate Bond"',
+    postOfficeCategory => '"NSC" or "KVP"',
+    sukanyaCategory => '"Daughter\'s SSY"',
+    realEstateCategory => '"Plot booking"',
+    cryptoCategory => '"Bitcoin"',
+    ulipCategory => '"LIC Jeevan Anand"',
+    p2pCategory => '"LenDenClub"',
+    _ => '"Chit fund"',
+  };
+
   void _buildAccountOptions() {
     _accountOptions.clear();
     for (final a in store.selectableAccounts) {
@@ -478,17 +755,33 @@ class ChatEngine {
         return null;
       case _Step.category:
         // Accept "🛒 Groceries" chips or typed names.
-        final all = flow == ChatFlow.credit
-            ? creditCategories
-            : debitCategories;
+        final all = switch (flow) {
+          ChatFlow.credit => creditCategories,
+          ChatFlow.invest => investmentTypes,
+          _ => debitCategories,
+        };
         for (final c in all) {
-          if (text == '${c.emoji} ${c.name}' ||
-              text.toLowerCase() == c.name.toLowerCase()) {
+          if (text == '${c.emoji} ${investmentLabel(c.name)}' ||
+              text == '${c.emoji} ${c.name}' ||
+              text.toLowerCase() == c.name.toLowerCase() ||
+              text.toLowerCase() == investmentLabel(c.name).toLowerCase()) {
             _category = c.name;
             return null;
           }
         }
+        if (flow == ChatFlow.invest) {
+          // "axis bluechip sip" → SIP & Mutual Funds, else Other.
+          final g = guessCategory(isCredit: false, merchant: text, message: '');
+          _category = investmentCategories.contains(g)
+              ? g
+              : otherInvestCategory;
+          _person = text;
+          return null;
+        }
         _category = text; // custom category
+        return null;
+      case _Step.investName:
+        if (text != skipOption) _person = text;
         return null;
       case _Step.account:
         if (text == skipOption) {
@@ -617,6 +910,7 @@ class ChatEngine {
       ChatFlow.borrow => TxnType.borrow,
       _ => TxnType.debit,
     };
+
     final t = Txn(
       id: store.newId(),
       type: type,
@@ -680,7 +974,19 @@ class ChatEngine {
         if (dup > 0) '♻️ $dup already recorded',
         if (failed > 0) '❓ $failed not understood',
       ];
-      if (added == 0 && dup == 0) {
+      final lower = text.toLowerCase();
+      if (added == 0 &&
+          dup == 0 &&
+          RegExp(r'\bsip\b').hasMatch(lower) &&
+          RegExp(r'cancel|discontinu|stopp?ed|ceased').hasMatch(lower)) {
+        out.add(
+          _bot(
+            '📈 That\'s a SIP cancellation notice: no money moved, so '
+            'there\'s nothing to record. Instalments you already paid stay '
+            'in your investments.',
+          ),
+        );
+      } else if (added == 0 && dup == 0) {
         out.add(
           _bot(
             'I couldn\'t find a transaction in that message. 🤔\n'
@@ -704,6 +1010,12 @@ String describeTxn(AppStore store, Txn t) {
   final accLine = acc == null ? '' : '\n💳 ${acc.displayName}';
   final who = store.merchantLabel(t.counterparty);
   final when = '\n📅 ${formatTxnDate(t.date)}';
+  if (AppStore.isInvestment(t)) {
+    return '📈 Invested ${money(t.amount)}'
+        '${who.isEmpty ? '' : ' in $who'}\n'
+        '${emojiFor(t.category)} ${investmentLabel(t.category)}'
+        '${t.note.isEmpty ? '' : '\n📝 ${t.note}'}$accLine$when';
+  }
   return switch (t.type) {
     TxnType.debit =>
       '➖ Spent ${money(t.amount)}'
