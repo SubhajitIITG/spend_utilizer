@@ -9,6 +9,7 @@ import '../models/models.dart';
 import '../services/categories.dart';
 import '../services/sms_parser.dart';
 import '../services/sync_types.dart';
+import '../util/period.dart';
 
 /// Where the JSON data lives. Swappable so tests can use memory.
 abstract class Storage {
@@ -877,66 +878,49 @@ class AppStore extends ChangeNotifier {
 
   // ----------------------------------------------------------------- stats
 
-  bool _inMonth(DateTime d, DateTime month) =>
-      d.year == month.year && d.month == month.month;
+  // Totals work on any [Period]; the month versions are shortcuts.
 
-  Iterable<Txn> txnsInMonth(DateTime month) =>
-      txns.where((t) => _inMonth(t.date, month));
+  Iterable<Txn> txnsIn(Period p) => txns.where((t) => p.contains(t.date));
+
+  Iterable<Txn> txnsInMonth(DateTime month) => txnsIn(Period.month(month));
 
   /// Whether a debit counts as spending. Card-bill payments don't (the
   /// purchases were counted on the card) and neither do SIPs/investments
-  /// (that money is saved; see [investedIn]).
+  /// (that money is saved; see [investedDuring]).
   static bool isSpending(Txn t) =>
       t.type == TxnType.debit &&
       t.category != cardBillCategory &&
       !investmentCategories.contains(t.category);
 
-  /// Money spent in [month].
-  double spentIn(DateTime month) =>
-      txnsInMonth(month).where(isSpending).fold(0.0, (s, t) => s + t.amount);
+  static bool isInvestment(Txn t) =>
+      t.type == TxnType.debit && investmentCategories.contains(t.category);
 
-  /// Money put into SIPs and other investments in [month].
-  double investedIn(DateTime month) => txnsInMonth(month)
-      .where(
-        (t) =>
-            t.type == TxnType.debit &&
-            investmentCategories.contains(t.category),
-      )
-      .fold(0.0, (s, t) => s + t.amount);
+  static double _sum(Iterable<Txn> ts) => ts.fold(0.0, (s, t) => s + t.amount);
 
-  /// Investments (SIP, FD, RD, stocks, bonds, other) in [year], newest
-  /// first.
-  List<Txn> investmentsInYear(int year) =>
-      txns
-          .where(
-            (t) =>
-                t.type == TxnType.debit &&
-                investmentCategories.contains(t.category) &&
-                t.date.year == year,
-          )
-          .toList()
+  double spentDuring(Period p) => _sum(txnsIn(p).where(isSpending));
+  double receivedDuring(Period p) =>
+      _sum(txnsIn(p).where((t) => t.type == TxnType.credit));
+  double investedDuring(Period p) => _sum(txnsIn(p).where(isInvestment));
+
+  double spentIn(DateTime month) => spentDuring(Period.month(month));
+  double receivedIn(DateTime month) => receivedDuring(Period.month(month));
+  double investedIn(DateTime month) => investedDuring(Period.month(month));
+
+  /// Investments (SIP, FD, RD, stocks, bonds, other) in [p], newest first.
+  List<Txn> investmentsDuring(Period p) =>
+      txnsIn(p).where(isInvestment).toList()
         ..sort((a, b) => b.date.compareTo(a.date));
+
+  List<Txn> investmentsInYear(int year) =>
+      investmentsDuring(Period.custom(DateTime(year), DateTime(year, 12, 31)));
 
   /// SIP payments in [year], newest first.
   List<Txn> sipsInYear(int year) =>
-      txns
-          .where(
-            (t) =>
-                t.type == TxnType.debit &&
-                t.category == sipCategory &&
-                t.date.year == year,
-          )
-          .toList()
-        ..sort((a, b) => b.date.compareTo(a.date));
+      investmentsInYear(year).where((t) => t.category == sipCategory).toList();
 
-  double receivedIn(DateTime month) =>
-      txnsInMonth(month)
-          .where((t) => t.type == TxnType.credit)
-          .fold(0.0, (s, t) => s + t.amount);
-
-  List<CategoryTotal> categoryTotals(DateTime month, TxnType type) {
+  List<CategoryTotal> categoryTotalsDuring(Period p, TxnType type) {
     final map = <String, double>{};
-    for (final t in txnsInMonth(month).where((t) => t.type == type)) {
+    for (final t in txnsIn(p).where((t) => t.type == type)) {
       // Card bills and investments aren't spending.
       if (type == TxnType.debit && !isSpending(t)) continue;
       map[t.category] = (map[t.category] ?? 0) + t.amount;
@@ -946,10 +930,14 @@ class AppStore extends ChangeNotifier {
     return list;
   }
 
+  List<CategoryTotal> categoryTotals(DateTime month, TxnType type) =>
+      categoryTotalsDuring(Period.month(month), type);
+
+  double accountSpentDuring(Account a, Period p) =>
+      _sum(txnsIn(p).where((t) => t.accountId == a.id && isSpending(t)));
+
   double accountSpentIn(Account a, DateTime month) =>
-      txnsInMonth(month)
-          .where((t) => t.accountId == a.id && isSpending(t))
-          .fold(0.0, (s, t) => s + t.amount);
+      accountSpentDuring(a, Period.month(month));
 
   static const _fundNames = {
     'parag parikh': 'Parag Parikh MF',

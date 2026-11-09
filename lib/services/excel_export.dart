@@ -8,20 +8,8 @@ import 'package:intl/intl.dart';
 
 import '../data/store.dart';
 import '../models/models.dart';
+import '../util/period.dart';
 import 'categories.dart';
-
-class ExportRange {
-  final String label;
-  final DateTime? from; // inclusive; null = beginning of time
-  const ExportRange(this.label, this.from);
-
-  static List<ExportRange> presets(DateTime now) => [
-    ExportRange('This month', DateTime(now.year, now.month)),
-    ExportRange('Last 3 months', DateTime(now.year, now.month - 2)),
-    ExportRange('Last 12 months', DateTime(now.year, now.month - 11)),
-    const ExportRange('All time', null),
-  ];
-}
 
 class ExcelExporter {
   static final _d = DateFormat('dd-MM-yyyy');
@@ -52,15 +40,12 @@ class ExcelExporter {
     }
   }
 
-  static List<int> build(AppStore store, ExportRange range) {
+  static List<int> build(AppStore store, Period period) {
     final excel = Excel.createExcel();
     final defaultSheet = excel.getDefaultSheet() ?? 'Sheet1';
 
-    final txns =
-        store.txns
-            .where((t) => range.from == null || !t.date.isBefore(range.from!))
-            .toList()
-          ..sort((a, b) => a.date.compareTo(b.date));
+    final txns = store.txns.where((t) => period.contains(t.date)).toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
 
     // ---- Transactions
     final tx = excel['Transactions'];
@@ -120,6 +105,7 @@ class ExcelExporter {
     tx.appendRow([
       _t('Credit-card bill payments and investments are not counted as spent.'),
     ]);
+    tx.appendRow([_t('Period: ${period.label}')]);
 
     // ---- Monthly summary
     final monthly = excel['Monthly Summary'];

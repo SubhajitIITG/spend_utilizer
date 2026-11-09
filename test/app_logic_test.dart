@@ -4,6 +4,7 @@ import 'package:spend_utilizer/data/store.dart';
 import 'package:spend_utilizer/models/models.dart';
 import 'package:spend_utilizer/services/chat_engine.dart';
 import 'package:spend_utilizer/services/excel_export.dart';
+import 'package:spend_utilizer/util/period.dart';
 import 'package:spend_utilizer/services/sms_parser.dart';
 import 'package:spend_utilizer/util/format.dart';
 
@@ -190,7 +191,7 @@ void main() {
     final s = await newStore();
     s.addFromSms(hdfcCard1);
     s.addFromSms(sbiSavings);
-    final bytes = ExcelExporter.build(s, const ExportRange('All time', null));
+    final bytes = ExcelExporter.build(s, Period.allTime(DateTime.now()));
     final x = Excel.decodeBytes(bytes);
     expect(
       x.tables.keys,

@@ -59,9 +59,9 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         'History',
         actions: [
           IconButton(
-            tooltip: 'Download Excel statement',
+            tooltip: 'Download statement (Excel or PDF)',
             icon: const Icon(Icons.file_download_outlined),
-            onPressed: () => exportToExcel(context),
+            onPressed: () => exportStatement(context),
           ),
         ],
       ),

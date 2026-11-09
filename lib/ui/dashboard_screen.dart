@@ -6,6 +6,7 @@ import '../data/store.dart';
 import '../models/models.dart';
 import '../services/categories.dart';
 import '../util/format.dart';
+import '../util/period.dart';
 import 'export_action.dart';
 import 'merchant_sheet.dart';
 import 'profile_screen.dart';
@@ -21,17 +22,26 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
+  /// The period everything on the Dashboard shows. Starts as this month.
+  Period _period = Period.month(DateTime.now());
   TxnType _breakdown = TxnType.debit;
 
   void _shift(int delta) =>
-      setState(() => _month = DateTime(_month.year, _month.month + delta));
+      setState(() => _period = _period.shiftMonths(delta));
+
+  Future<void> _choosePeriod() async {
+    final picked = await pickPeriod(context, current: _period);
+    if (picked != null) setState(() => _period = picked);
+  }
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final now = DateTime.now();
-    final isCurrent = _month.year == now.year && _month.month == now.month;
+    final isCurrent =
+        _period.isMonth &&
+        _period.from.year == now.year &&
+        _period.from.month == now.month;
 
     return Scaffold(
       appBar: royalAppBar(
@@ -39,9 +49,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         actions: [
           const SyncStatusButton(),
           IconButton(
-            tooltip: 'Download Excel statement',
+            tooltip: 'Choose dates',
+            icon: const Icon(Icons.date_range_outlined),
+            onPressed: _choosePeriod,
+          ),
+          IconButton(
+            tooltip: 'Download statement (Excel or PDF)',
             icon: const Icon(Icons.file_download_outlined),
-            onPressed: () => exportToExcel(context),
+            onPressed: () => exportStatement(context, initial: _period),
           ),
         ],
       ),
@@ -53,9 +68,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               _HeroCard(
                 store: store,
-                month: _month,
-                onPrev: () => _shift(-1),
-                onNext: isCurrent ? null : () => _shift(1),
+                period: _period,
+                onPrev: _period.isMonth ? () => _shift(-1) : null,
+                onNext: _period.isMonth && !isCurrent ? () => _shift(1) : null,
+                onChoose: _choosePeriod,
+                onReset: _period.isMonth
+                    ? null
+                    : () => setState(() => _period = Period.month(now)),
               ),
               const SizedBox(height: 14),
               _Section(
@@ -77,9 +96,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       setState(() => _breakdown = s.first),
                 ),
                 child: _CategoryBreakdown(
-                  totals: store.categoryTotals(_month, _breakdown),
+                  totals: store.categoryTotalsDuring(_period, _breakdown),
                 ),
               ),
+              // Investments right below the chart.
+              if (store.investmentsDuring(_period).isNotEmpty ||
+                  store.investmentsInYear(_period.to.year).isNotEmpty)
+                _Section(
+                  title: 'Investments',
+                  child: _InvestmentsOverview(store: store, period: _period),
+                ),
               if (store.merchantsToReview().isNotEmpty)
                 _Section(
                   title: 'Regular payments to review',
@@ -91,13 +117,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   onPressed: widget.onOpenAccounts,
                   child: const Text('Manage'),
                 ),
-                child: _AccountsOverview(store: store, month: _month),
+                child: _AccountsOverview(store: store, period: _period),
               ),
-              if (store.investmentsInYear(_month.year).isNotEmpty)
-                _Section(
-                  title: 'Investments',
-                  child: _InvestmentsOverview(store: store, month: _month),
-                ),
               _Section(
                 title: 'Lend & borrow',
                 child: _DebtsOverview(store: store),
@@ -160,24 +181,30 @@ class _Section extends StatelessWidget {
 
 class _HeroCard extends StatelessWidget {
   final AppStore store;
-  final DateTime month;
-  final VoidCallback onPrev;
+  final Period period;
+  final VoidCallback? onPrev;
   final VoidCallback? onNext;
+  final VoidCallback onChoose;
+
+  /// Back to the monthly view (null while showing a month).
+  final VoidCallback? onReset;
   const _HeroCard({
     required this.store,
-    required this.month,
+    required this.period,
     required this.onPrev,
     required this.onNext,
+    required this.onChoose,
+    required this.onReset,
   });
 
   @override
   Widget build(BuildContext context) {
-    final spent = store.spentIn(month);
-    final recv = store.receivedIn(month);
-    final invested = store.investedIn(month);
+    final spent = store.spentDuring(period);
+    final recv = store.receivedDuring(period);
+    final invested = store.investedDuring(period);
     // What's left after spending and investing.
     final net = recv - spent - invested;
-    final count = store.txnsInMonth(month).length;
+    final count = store.txnsIn(period).length;
     const muted = TextStyle(color: Color(0xCCFFFFFF), fontSize: 12.5);
 
     Widget stat(String label, String value, Color color) => Expanded(
@@ -221,13 +248,48 @@ class _HeroCard extends StatelessWidget {
                 icon: const Icon(Icons.chevron_left),
               ),
               Expanded(
-                child: Text(
-                  formatMonth(month).toUpperCase(),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Royal.goldLight,
-                    letterSpacing: 2,
-                    fontWeight: FontWeight.w600,
+                // Tap the dates to choose another period.
+                child: InkWell(
+                  onTap: onChoose,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                period.label.toUpperCase(),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Royal.goldLight,
+                                  letterSpacing: 2,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            const Icon(
+                              Icons.expand_more,
+                              size: 18,
+                              color: Royal.goldLight,
+                            ),
+                          ],
+                        ),
+                        if (onReset != null)
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            onPressed: onReset,
+                            icon: const Icon(Icons.close, size: 16),
+                            label: const Text('Back to monthly view'),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -387,8 +449,8 @@ class _CategoryBreakdown extends StatelessWidget {
 
 class _AccountsOverview extends StatelessWidget {
   final AppStore store;
-  final DateTime month;
-  const _AccountsOverview({required this.store, required this.month});
+  final Period period;
+  const _AccountsOverview({required this.store, required this.period});
 
   @override
   Widget build(BuildContext context) {
@@ -434,7 +496,9 @@ class _AccountsOverview extends StatelessWidget {
                       '${a.type.label}'
                       '${a.last4.isEmpty ? '' : ' ••${a.last4}'}',
                     ),
-              trailing: Text('${money(store.accountSpentIn(a, month))} spent'),
+              trailing: Text(
+                '${money(store.accountSpentDuring(a, period))} spent',
+              ),
             ),
         ],
       ],
@@ -491,13 +555,16 @@ class _MerchantReview extends StatelessWidget {
 
 class _InvestmentsOverview extends StatelessWidget {
   final AppStore store;
-  final DateTime month;
-  const _InvestmentsOverview({required this.store, required this.month});
+  final Period period;
+  const _InvestmentsOverview({required this.store, required this.period});
 
   @override
   Widget build(BuildContext context) {
-    final year = store.investmentsInYear(month.year);
-    final thisMonth = year.where((t) => t.date.month == month.month).toList();
+    // "year" = the calendar year the period ends in, for context.
+    final yearNo = period.to.year;
+    final year = store.investmentsInYear(yearNo);
+    final thisMonth = store.investmentsDuring(period);
+    final periodLabel = period.isMonth ? 'This month' : 'This period';
     double sum(Iterable<Txn> ts) => ts.fold(0.0, (s, t) => s + t.amount);
     final t = Theme.of(context).textTheme;
 
@@ -523,8 +590,8 @@ class _InvestmentsOverview extends StatelessWidget {
       children: [
         Row(
           children: [
-            figure('This month', sum(thisMonth), color: Royal.income(context)),
-            figure('So far in ${month.year}', sum(year)),
+            figure(periodLabel, sum(thisMonth), color: Royal.income(context)),
+            figure('So far in $yearNo', sum(year)),
           ],
         ),
         const SizedBox(height: 8),
@@ -543,7 +610,7 @@ class _InvestmentsOverview extends StatelessWidget {
               ),
               subtitle: Text(
                 '${money(sum(year.where((x) => x.category == cat)))} '
-                'in ${month.year}',
+                'in $yearNo',
               ),
               trailing: Text(
                 money(sum(thisMonth.where((x) => x.category == cat))),
@@ -570,7 +637,8 @@ class _InvestmentsOverview extends StatelessWidget {
           ],
         const SizedBox(height: 4),
         Text(
-          'Right column: this month. Investments are counted as Invested, '
+          'Right column: ${periodLabel.toLowerCase()}. Investments are '
+          'counted as Invested, '
           'not Spent.',
           style: t.bodySmall,
         ),
