@@ -487,6 +487,7 @@ class _OptionsBar extends StatelessWidget {
       for (final f in [
         ChatFlow.debit,
         ChatFlow.credit,
+        ChatFlow.invest,
         ChatFlow.lend,
         ChatFlow.borrow,
         ChatFlow.reminder,

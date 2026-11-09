@@ -6,6 +6,27 @@ class Category {
   const Category(this.name, this.emoji);
 }
 
+/// Every kind of investment, in the order the Dashboard and the Invest
+/// button list them. Money put into these is "Invested", not "Spent".
+const investmentTypes = <Category>[
+  Category(sipCategory, '📈'),
+  Category(stocksCategory, '📊'),
+  Category(fdCategory, '🏛️'),
+  Category(rdCategory, '📅'),
+  Category(ppfCategory, '🐖'),
+  Category(epfCategory, '👔'),
+  Category(npsCategory, '👴'),
+  Category(goldCategory, '🪙'),
+  Category(bondsCategory, '📜'),
+  Category(postOfficeCategory, '📮'),
+  Category(sukanyaCategory, '👧'),
+  Category(realEstateCategory, '🏘️'),
+  Category(cryptoCategory, '₿'),
+  Category(ulipCategory, '🛡️'),
+  Category(p2pCategory, '🤲'),
+  Category(otherInvestCategory, '💹'),
+];
+
 const debitCategories = <Category>[
   Category('Groceries', '🛒'),
   Category('Food & Dining', '🍔'),
@@ -20,12 +41,7 @@ const debitCategories = <Category>[
   Category('Education', '📚'),
   Category('Travel', '✈️'),
   Category('EMI & Loans', '🏦'),
-  Category(sipCategory, '📈'),
-  Category(fdCategory, '🏛️'),
-  Category(rdCategory, '📅'),
-  Category(stocksCategory, '📊'),
-  Category(bondsCategory, '📜'),
-  Category(otherInvestCategory, '💹'),
+  ...investmentTypes,
   Category('Insurance', '🛡️'),
   Category('Personal Care', '💇'),
   Category('Gifts & Donations', '🎁'),
@@ -61,19 +77,33 @@ const rdCategory = 'Recurring Deposit';
 const stocksCategory = 'Stocks';
 const bondsCategory = 'Bonds';
 
-/// NPS, PPF, digital gold… (kept as "Investments" for existing data).
+const ppfCategory = 'PPF';
+const epfCategory = 'EPF / VPF';
+const npsCategory = 'NPS';
+const goldCategory = 'Gold & Silver';
+const postOfficeCategory = 'Post Office Schemes';
+const sukanyaCategory = 'Sukanya Samriddhi';
+const realEstateCategory = 'Real Estate';
+const cryptoCategory = 'Crypto';
+const ulipCategory = 'ULIP & Savings Plans';
+const p2pCategory = 'P2P Lending';
+
+/// Anything else (kept as "Investments" for existing data).
 const otherInvestCategory = 'Investments';
 
 /// Investment types, in the order the Dashboard lists them.
-const investmentCategoryOrder = [
-  sipCategory,
-  fdCategory,
-  rdCategory,
-  stocksCategory,
-  bondsCategory,
-  otherInvestCategory,
-];
+final investmentCategoryOrder = [for (final c in investmentTypes) c.name];
 final investmentCategories = investmentCategoryOrder.toSet();
+
+/// How an investment type is shown in lists ("Other investments").
+String investmentLabel(String category) =>
+    category == otherInvestCategory ? 'Other investments' : category;
+
+/// Debit categories that are real spending (the Debit flow offers these;
+/// investments have their own Invest button).
+final spendingCategories = debitCategories
+    .where((c) => !investmentCategories.contains(c.name))
+    .toList();
 
 /// Paying a credit-card bill. Not new spending (the purchases were already
 /// counted on the card), so it is left out of spending totals.
@@ -158,10 +188,21 @@ const _debitRules = <String, List<String>>{
     'hsbc mf',
     'bandhan mf',
   ],
-  bondsCategory: [
-    'bond',
+  goldCategory: [
+    'digital gold',
+    'safegold',
+    'mmtc-pamp',
+    'augmont',
+    'jar app',
     'sgb',
     'sovereign gold',
+    'gold etf',
+    'goldbees',
+    'gold fund',
+    'silver etf',
+  ],
+  bondsCategory: [
+    'bond',
     'rbi retail direct',
     'rbi bonds',
     'ncd',
@@ -229,17 +270,44 @@ const _debitRules = <String, List<String>>{
     'smallcase',
     'indmoney',
   ],
-  otherInvestCategory: [
-    'nps',
-    'national pension',
-    'ppf',
-    'public provident',
-    'sukanya',
-    'digital gold',
-    'safegold',
-    'mmtc-pamp',
-    'augmont',
-    'jar app',
+  ppfCategory: ['ppf', 'public provident'],
+  sukanyaCategory: ['sukanya', 'ssy a/c', 'ssy account'],
+  epfCategory: ['epfo', 'epf ', 'vpf', 'employees provident', 'provident fund'],
+  npsCategory: ['nps', 'national pension', 'pran ', 'protean cra', 'kfin cra'],
+  postOfficeCategory: [
+    'post office',
+    'india post',
+    'ippb',
+    'kisan vikas',
+    'kvp',
+    'national savings certificate',
+    'nsc ',
+    'scss',
+    'senior citizen savings',
+    'pomis',
+    'monthly income scheme',
+  ],
+  cryptoCategory: [
+    'wazirx',
+    'coindcx',
+    'coinswitch',
+    'zebpay',
+    'mudrex',
+    'giottus',
+    'bitbns',
+    'binance',
+    'bitcoin',
+    'crypto',
+  ],
+  realEstateCategory: ['strata', 'hbits', 'property booking', 'reit '],
+  ulipCategory: ['ulip'],
+  p2pCategory: [
+    'lendenclub',
+    'faircent',
+    'liquiloans',
+    'lendbox',
+    '12% club',
+    'p2p',
   ],
   'Groceries': [
     'bigbasket',

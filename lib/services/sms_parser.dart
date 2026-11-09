@@ -28,6 +28,13 @@ class ParsedSms {
   final bool isRefund;
   final String category;
 
+  /// A mutual fund house's confirmation (units allotted for a SIP or
+  /// purchase). It names the fund but not the bank account.
+  final bool isFundSms;
+
+  /// Extra detail worth keeping, e.g. "Folio ••0685 · 14.685 units".
+  final String note;
+
   const ParsedSms({
     required this.type,
     required this.amount,
@@ -41,6 +48,8 @@ class ParsedSms {
     this.dateFound = true,
     required this.isRefund,
     required this.category,
+    this.isFundSms = false,
+    this.note = '',
   });
 
   @override
@@ -69,6 +78,9 @@ class SmsParser {
 
     final amount = _amount(text);
     if (amount == null || amount <= 0) return null;
+
+    final fund = _fundAllotment(text, lower, amount, now);
+    if (fund != null) return fund;
 
     final type = _type(lower);
     if (type == null) return null;
@@ -122,6 +134,130 @@ class SmsParser {
       isRefund: isRefund,
       category: category,
     );
+  }
+
+  // ---------------------------------------------------------- mutual funds
+
+  /// "Your SIP … in scheme UTI Nifty 50 Index Fund … for Rs.9000.00 is
+  /// processed and 52.227 units at NAV 172.317 … are allotted" and "Payment
+  /// of Rs. 1999.90 towards your SIP in Axis Small Cap Fund Direct Growth
+  /// has been received and 14.685 units at NAV 136.19 are allotted…".
+  static ParsedSms? _fundAllotment(
+    String text,
+    String lower,
+    double amount,
+    DateTime now,
+  ) {
+    final hasUnits = RegExp(r'\bunits?\b').hasMatch(lower);
+    final hasNav = RegExp(r'\bnav\b').hasMatch(lower);
+    final isFund = RegExp(r'\b(sip|folio|scheme|mutual fund|mf|fund)\b')
+        .hasMatch(lower);
+    if (!(hasUnits && hasNav && isFund)) return null;
+    // Selling / redeeming units is money coming back, not an investment.
+    if (RegExp(r'\b(redemption|redeemed|redeem|switch[- ]?out|stp out|swp)\b')
+        .hasMatch(lower)) {
+      return null;
+    }
+    if (RegExp(r'\b(cancel(l)?ed|cancel(l)?ation|rejected|failed)\b')
+        .hasMatch(lower)) {
+      return null;
+    }
+    final name = fundNameIn(text);
+    final folio = RegExp(
+      r'folio(?:\s*(?:no\.?|number))?[\s:-]*[x*]*(\d{3,})',
+      caseSensitive: false,
+    ).firstMatch(text);
+    final units = RegExp(
+      r'([0-9][0-9,]*\.?[0-9]*)\s*units',
+      caseSensitive: false,
+    ).firstMatch(text);
+    final nav = RegExp(
+      r'nav\s*(?:of\s*)?(?:rs\.?\s*|₹\s*)?([0-9][0-9,]*\.?[0-9]*)',
+      caseSensitive: false,
+    ).firstMatch(text);
+    final (date, dateFound) = _date(text, now);
+    final isSip = RegExp(r'\bsip\b').hasMatch(lower);
+    final note = [
+      if (isSip) 'SIP instalment' else 'Mutual fund purchase',
+      if (folio != null) 'Folio ••${_tail(folio.group(1)!)}',
+      if (units != null && nav != null)
+        '${units.group(1)} units @ NAV ${nav.group(1)}',
+    ].join(' · ');
+    return ParsedSms(
+      type: TxnType.debit,
+      amount: amount,
+      bank: '',
+      accountType: AccountType.savings,
+      last4: '',
+      counterparty: name,
+      refNo: '',
+      date: date,
+      dateFound: dateFound,
+      isRefund: false,
+      category: sipCategory,
+      isFundSms: true,
+      note: note,
+    );
+  }
+
+  /// The fund's name in a fund-house message, shortened ("Axis Small Cap
+  /// Fund"), or the fund house ("UTI MF") when no scheme is named.
+  static String fundNameIn(String text) {
+    final patterns = [
+      RegExp(
+        r'\bscheme[:\s-]+(.+?)\s+(?:invested|has|is|for|under|with|are|through)\b',
+        caseSensitive: false,
+      ),
+      RegExp(
+        r'\b(?:sip|purchase|investment)\s+(?:in|into|of|for)\s+(?:the\s+)?'
+        r'(.+?)\s+(?:has|is|for|under|with|are|through|folio)\b',
+        caseSensitive: false,
+      ),
+      RegExp(
+        r'\b(?:in|for|under)\s+((?:[A-Z0-9][\w&\-]*\s+){1,8}?'
+        r'(?:Fund|FoF|ETF)\b(?:\s+(?:Direct|Regular|Plan|Growth|IDCW|Option|-)+)*)',
+      ),
+    ];
+    for (final re in patterns) {
+      final m = re.firstMatch(text);
+      if (m == null) continue;
+      final name = shortFundName(m.group(1)!);
+      if (name.length >= 3 &&
+          RegExp(r'[a-z]', caseSensitive: false).hasMatch(name)) {
+        return name;
+      }
+    }
+    final house = RegExp(
+      r'([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)\s+(?:MF|Mutual Fund)\b',
+    ).allMatches(text);
+    if (house.isNotEmpty) return '${house.last.group(1)} MF';
+    return 'Mutual fund';
+  }
+
+  /// "UTI Nifty 50 Index Fund Direct Plan Growth" → "UTI Nifty 50 Index
+  /// Fund". Also drops "…" left by apps that cut long names.
+  static String shortFundName(String raw) {
+    var s = raw
+        .replaceAll(RegExp(r'(\.\.\.|…)\s*$'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    s = s.replaceAll(
+      RegExp(
+        r'(\s*[-–]?\s*\b(direct|dir|regular|reg|plan|growth|gr|idcw|'
+        r'dividend|option|opt|payout|reinvestment)\b\.?)+\s*$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    // A cut-off last word ("Fund Dire") is dropped too.
+    s = s.replaceAll(
+      RegExp(
+        r'\s+(dir|dire|direc|gro|grow|growt|pla|reg|regu)$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    return s.trim();
   }
 
   // ---------------------------------------------------- shared helpers

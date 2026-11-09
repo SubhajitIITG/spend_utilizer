@@ -462,6 +462,7 @@ class AppStore extends ChangeNotifier {
     final p = SmsParser.parse(raw);
     if (p == null) return const SmsResult(SmsStatus.notTransaction);
     if (_isDuplicate(p, raw)) return const SmsResult(SmsStatus.duplicate);
+    if (p.isFundSms) return _addFundSms(p, raw);
     final (found, isNew) = findOrCreateAccount(p.bank, p.accountType, p.last4);
     // The user said this account isn't theirs: don't attach payments to it.
     final account = found.ownership == Ownership.notMine ? null : found;
@@ -470,6 +471,24 @@ class AppStore extends ChangeNotifier {
     final category = p.type == TxnType.debit && (rule?.decided ?? false)
         ? rule!.category
         : p.category;
+    // The same SIP may already be in from the fund house's SMS or a Groww
+    // screenshot: link this account to it instead of counting it twice.
+    if (p.type == TxnType.debit && investmentCategories.contains(category)) {
+      final same = findSameInvestment(
+        p.amount,
+        p.date,
+        p.counterparty,
+        unlinkedOnly: true,
+      );
+      if (same != null) {
+        if (account != null) {
+          same.accountId = account.id;
+          _touchTxn(same);
+          _changed();
+        }
+        return SmsResult(SmsStatus.duplicate, txn: same);
+      }
+    }
     final t = Txn(
       id: newId(),
       type: p.type,
@@ -494,6 +513,143 @@ class AppStore extends ChangeNotifier {
       newAccount: isNew,
       dateFound: p.dateFound,
     );
+  }
+
+  SmsResult _addFundSms(ParsedSms p, String raw) {
+    final same = findSameInvestment(p.amount, p.date, p.counterparty);
+    if (same != null) {
+      _improveInvestment(same, p.counterparty, p.note);
+      return SmsResult(SmsStatus.duplicate, txn: same);
+    }
+    final t = Txn(
+      id: newId(),
+      type: TxnType.debit,
+      amount: p.amount,
+      category: p.category,
+      counterparty: p.counterparty,
+      note: p.note,
+      date: p.date,
+      source: 'sms',
+      rawMessage: raw.trim(),
+    );
+    txns.add(t);
+    _touchTxn(t);
+    _changed();
+    return SmsResult(SmsStatus.added, txn: t, dateFound: p.dateFound);
+  }
+
+  /// An investment already recorded that is the same one as [amount] on
+  /// [date] in [fund]: the bank's auto-debit, the fund house's SMS and a
+  /// Groww screenshot all describe one SIP instalment. Amounts may differ
+  /// by stamp duty (₹2,000 → ₹1,999.90) and dates by a few days.
+  ///
+  /// With [unlinkedOnly] (a bank debit), only investments not yet tied to
+  /// an account match, so three ₹2,000 SIPs on one day stay three.
+  Txn? findSameInvestment(
+    double amount,
+    DateTime date,
+    String fund, {
+    bool unlinkedOnly = false,
+  }) {
+    final key = fundKey(fund);
+    Txn? best;
+    var bestGap = 1 << 30;
+    for (final t in txns) {
+      if (!isInvestment(t)) continue;
+      if (unlinkedOnly && t.accountId != null) continue;
+      final tolerance = amount * 0.001 < 1 ? 1 : amount * 0.001;
+      if ((t.amount - amount).abs() > tolerance) continue;
+      final gap = t.date.difference(date).inHours.abs();
+      if (gap > 7 * 24) continue;
+      final other = fundKey(t.counterparty);
+      // Two different named funds are two different investments.
+      if (!_sameFund(key, other)) continue;
+      if (gap < bestGap) {
+        best = t;
+        bestGap = gap;
+      }
+    }
+    return best;
+  }
+
+  static bool _sameFund(String a, String b) =>
+      a.isEmpty ||
+      b.isEmpty ||
+      a == b ||
+      a.startsWith('$b ') ||
+      b.startsWith('$a ');
+
+  /// First three words of a fund's name ("axis small cap"), just the fund house
+  /// for "UTI MF" ("uti"), or '' if [name] doesn't name a fund (e.g. "BSE
+  /// LIMITED" on a bank debit).
+  static String fundKey(String name) {
+    final lower = name.toLowerCase().trim();
+    final house = RegExp(r'^([a-z]+)\s+(mf|mutual fund)$').firstMatch(lower);
+    if (house != null) return house.group(1)!;
+    if (!RegExp(r'\b(fund|fof|etf|index|cap|flexi|plan)\b').hasMatch(lower)) {
+      return '';
+    }
+    final words = lower
+        .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
+        .split(' ')
+        .where((w) => w.isNotEmpty)
+        .toList();
+    if (words.length < 2) return '';
+    return words.take(3).join(' ');
+  }
+
+  /// Gives a matched investment the fund's name and details when it only
+  /// had the bank's ("BSE LIMITED", "ACH D-…").
+  void _improveInvestment(Txn t, String fund, String note) {
+    var changed = false;
+    if (fund.isNotEmpty &&
+        fundKey(fund).isNotEmpty &&
+        fundKey(t.counterparty).isEmpty) {
+      t.counterparty = fund;
+      changed = true;
+    }
+    if (note.isNotEmpty && t.note.isEmpty) {
+      t.note = note;
+      changed = true;
+    }
+    if (changed) {
+      _touchTxn(t);
+      _changed();
+    }
+  }
+
+  /// Adds investments read from an order list (e.g. Groww's Mutual Funds
+  /// orders). Returns how many were new; ones already recorded are
+  /// matched and given the fund's name instead.
+  (int added, int matched) addInvestments(
+    List<({double amount, DateTime date, String fund, String note})> items, {
+    String rawText = '',
+  }) {
+    var added = 0, matched = 0;
+    for (final i in items) {
+      final same = findSameInvestment(i.amount, i.date, i.fund);
+      if (same != null) {
+        _improveInvestment(same, i.fund, i.note);
+        matched++;
+        continue;
+      }
+      final t = Txn(
+        id: newId(),
+        type: TxnType.debit,
+        amount: i.amount,
+        category: sipCategory,
+        counterparty: i.fund,
+        note: i.note,
+        date: i.date,
+        source: 'screenshot',
+        rawMessage: rawText,
+      );
+      txns.add(t);
+      _touchTxn(t);
+      added++;
+    }
+    if (added > 0) _changed();
+    return (added, matched);
   }
 
   /// Records a payment read from a screenshot (see screenshot_parser).

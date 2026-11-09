@@ -361,13 +361,13 @@ void main() {
           'Stocks',
       'Rs.15,000 debited from A/c XX1234 on 05-11-26 for Sovereign Gold '
               'Bond SGB 2026-27 -SBI':
-          'Bonds',
+          'Gold & Silver',
       'Rs 20,000 debited from A/c XX1234 on 05-11-26 to RBI RETAIL DIRECT '
               'T-Bill purchase -HDFC':
           'Bonds',
       'Rs.5,000 debited from A/c XX1234 on 05-11-26 towards NPS '
               'contribution -SBI':
-          'Investments',
+          'NPS',
       'Rs.3,000 debited from A/c XX1234 on 05-11-26 ACH D- BSE LIMITED '
               '-SBI':
           'SIP & Mutual Funds',
